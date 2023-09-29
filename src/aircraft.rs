@@ -1,11 +1,15 @@
 use pyo3::prelude::*;
 
 use flyer::Aircraft;
+use flyer::Trim;
+
 use aerso::types::*;
-
 use std::collections::HashMap;
-
 use std::f64::consts::PI;
+use argmin::core::{State, Executor};
+use argmin::core::observers::{ObserverMode, SlogLogger};
+use argmin::solver::particleswarm::ParticleSwarm;
+use nalgebra::dvector;
 
 #[pyclass(name="Aircraft", unsendable)]
 pub struct PyAircraft {
@@ -54,8 +58,8 @@ impl PyAircraft {
         let iter = vec![
             ('x'.to_string(), &values[0]), ('y'.to_string(), &values[1]), ('z'.to_string(), &values[2]),
             ('u'.to_string(), &values[3]), ('v'.to_string(), &values[4]), ('w'.to_string(), &values[5]),
-            ("pitch".to_string(), &euler.0), ("roll".to_string(), &euler.1), ("yaw".to_string(), &euler.2),
-            ('p'.to_string(), &values[9]), ('q'.to_string(), &values[10]), ('r'.to_string(), &values[11])
+            ("roll".to_string(), &euler.0), ("pitch".to_string(), &euler.1), ("yaw".to_string(), &euler.2),
+            ('p'.to_string(), &values[10]), ('q'.to_string(), &values[11]), ('r'.to_string(), &values[12])
         ];
     
         let dict: HashMap<String, f64> = iter
@@ -171,4 +175,31 @@ impl PyAircraft {
     fn step(&mut self, dt: f64, input: Vec<f64>) {
         self.aircraft.aff_body.step(dt, &input);
     }
+
+    fn trim(&mut self, alt: f64, airspeed: f64, n_iters: u64) -> PyResult<Vec<f64>> {
+        
+        let cost = Trim {
+            alt,
+            airspeed
+        };
+    
+        let solver = ParticleSwarm::new((dvector![-20.0 * (PI/180.0), -4.0 * (PI/180.0), 0.0], dvector![20.0 * (PI/180.0), 4.0 * (PI/180.0), 1.0]), 40);
+            
+        let res = Executor::new(cost, solver)
+            .configure(|state| state.max_iters(n_iters))
+            .add_observer(SlogLogger::term(), ObserverMode::Always)
+            .run();
+            
+        let trim_result = match res {
+            Ok(trim_result) => trim_result,
+            Err(error) => panic!("ArgMin Error: {}", error)
+        };
+            
+        let best = trim_result.state().get_best_param().unwrap();
+        let best_pos = vec![best.position[0], best.position[1], best.position[2]];
+
+        Ok(best_pos)
+
+    }
+
 }

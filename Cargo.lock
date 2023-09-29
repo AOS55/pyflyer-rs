@@ -1248,7 +1248,9 @@ name = "pyflyer"
 version = "0.1.0"
 dependencies = [
  "aerso",
+ "argmin",
  "flyer-rs",
+ "nalgebra 0.32.3",
  "pyo3",
  "tiny-skia",
 ]
