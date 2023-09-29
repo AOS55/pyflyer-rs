@@ -26,6 +26,8 @@ jobs:
         target: [x86_64, x86, aarch64, armv7, s390x, ppc64le]
     steps:
       - uses: actions/checkout@v3
+        with:
+          submodules: recursive
       - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
@@ -41,7 +43,6 @@ jobs:
         with:
           name: wheels
           path: dist
-          submodules: recursive
 
   windows:
     runs-on: windows-latest
@@ -50,6 +51,8 @@ jobs:
         target: [x64, x86]
     steps:
       - uses: actions/checkout@v3
+        with:
+          submodules: recursive
       - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
@@ -65,7 +68,6 @@ jobs:
         with:
           name: wheels
           path: dist
-          submodules: recursive
 
   macos:
     runs-on: macos-latest
@@ -74,6 +76,8 @@ jobs:
         target: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v3
+        with:
+          submodules: recursive
       - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
@@ -93,6 +97,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          submodules: recursive
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
@@ -103,7 +109,6 @@ jobs:
         with:
           name: wheels
           path: dist
-          submodules: recursive
 
   release:
     name: Release

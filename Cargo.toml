@@ -3,7 +3,7 @@ name = "pyflyer"
 version = "0.1.0"
 authors = ["Alexander Quessy"]
 edition = "2021"
-description = "A PyO3 library providing methods to access the 12DoF non-linear aircaft simulation found in flyer-rs within a Python program. This library was aimed to link flyer-rs to FlyerEnv"
+description = "A PyO3 library providing methods to access the 12DoF non-linear aircaft simulation found in flyer-rs within a Python program. This library was aimed to link flyer-rs to FlyerEnv."
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
