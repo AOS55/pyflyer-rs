@@ -1,13 +1,7 @@
 use pyo3::prelude::*;
-
-
-use std::path::Path;
-
 use flyer::Aircraft;
 use flyer::World;
-
 use crate::PyAircraft;
-
 use aerso::types::*;
 
 #[pyclass(name="World", unsendable)]
@@ -22,10 +16,6 @@ impl PyWorld {
     fn new() -> Self {
         
         let w = World::default();
-
-        let local_resources = Path::new("resources");
-        w.ctx.fs.mount(local_resources, true);
-        println!("{:?}", w.ctx.fs.resources_dir());
         
         Self {world: w} 
     
@@ -56,18 +46,41 @@ impl PyWorld {
         self.world.create_map(seed, area, scaling, water_present);
     }
 
-    fn render(&mut self) {
-        self.world.render();
+    fn render(&mut self) -> Vec<u8> {
+       let pixmap = self.world.render();
+    //    pixmap.encode_png().unwrap()
+        pixmap.data().to_vec()
     }
 
-    fn get_image(&mut self) -> Vec<u8> {
-        self.world.get_image()
-    }
+    // fn get_image(&mut self) -> Vec<u8> {
+    //     self.world.get_image()
+    // }
 
     #[getter]
     fn get_vehicles(&self) -> PyResult<Vec<PyAircraft>> {
         let vehicles = self.world.vehicles.iter().map(|ac| PyAircraft{aircraft: ac.clone()}).collect();
         Ok(vehicles)
+    }
+
+    #[setter]
+    fn set_screen_dim(&mut self, dim: Vec<f32>) {
+        self.world.set_screen_dims(dim[0], dim[1])
+    }
+
+    #[getter]
+    fn get_screen_dim(&mut self) -> PyResult<Vec<f32>> {
+        let dim = self.world.screen_dims;
+        Ok(vec![dim[0], dim[1]])
+    }
+
+    #[getter]
+    fn get_screen_width(&mut self) -> PyResult<f32> {
+        Ok(self.world.screen_dims[0])
+    }
+
+    #[getter]
+    fn get_screen_height(&mut self) -> PyResult<f32> {
+        Ok(self.world.screen_dims[0])
     }
     
 }
@@ -75,8 +88,6 @@ impl PyWorld {
 impl Drop for PyWorld {
 
     fn drop(&mut self) {
-        println!("Calling the destructor!");
-        self.world.ctx.quit_requested = true;
     }
 
 }

@@ -5,6 +5,8 @@ use aerso::types::*;
 
 use std::collections::HashMap;
 
+use std::f64::consts::PI;
+
 #[pyclass(name="Aircraft", unsendable)]
 pub struct PyAircraft {
     pub aircraft: Aircraft
@@ -61,6 +63,31 @@ impl PyAircraft {
             .map(|(k, v)| (k, *v))
             .collect();
         return Ok(dict)
+    }
+
+    #[getter]
+    fn get_crashed(&self) -> PyResult<bool> { 
+
+        let quaternion = self.aircraft.attitude();
+        let euler = quaternion.euler_angles();
+
+        let crashed = if self.aircraft.position()[2] > -5.0 {
+            if self.aircraft.velocity()[0] > 200.0 {
+                true
+            } else if self.aircraft.velocity()[2] > 60.0 {
+                true
+            } else if (-5.0 * PI/180.0) > euler.0 {
+                true
+            } else if euler.0 > (30.0 * (PI/180.0)) {
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        Ok(crashed)
     }
 
     #[new]
