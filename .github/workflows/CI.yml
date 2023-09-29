@@ -41,6 +41,7 @@ jobs:
         with:
           name: wheels
           path: dist
+          submodules: recursive
 
   windows:
     runs-on: windows-latest
@@ -64,6 +65,7 @@ jobs:
         with:
           name: wheels
           path: dist
+          submodules: recursive
 
   macos:
     runs-on: macos-latest
@@ -101,6 +103,7 @@ jobs:
         with:
           name: wheels
           path: dist
+          submodules: recursive
 
   release:
     name: Release
