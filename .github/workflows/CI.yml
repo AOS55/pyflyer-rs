@@ -29,6 +29,10 @@ jobs:
       #     sudo apt install -y cmake pkg-config libfreetype6-dev libfontconfig1-dev libxcb-xfixes0-dev libxkbcommon-dev python3 fontconfig-config fontconfig vflib3-dev
       #     sudo apt update
       #     sudo apt upgrade
+      - name: Add fontconfig.pc
+        run: |
+          export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig/fontconfig.pc:$PKG_CONFIG_PATH
+
       - uses: actions/checkout@v3
         with:
           submodules: recursive
