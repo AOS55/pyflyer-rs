@@ -100,7 +100,8 @@ impl PyAircraft {
         initial_position: Option<Vec<f64>>,
         initial_velocity: Option<Vec<f64>>,
         initial_attitude: Option<Vec<f64>>,
-        initial_rates: Option<Vec<f64>>
+        initial_rates: Option<Vec<f64>>,
+        data_path: Option<String>
     ) -> Self {
         
         let aircraft_name = if let Some(name) = aircraft_name {
@@ -133,13 +134,20 @@ impl PyAircraft {
             Vector3::zeros()
         };
 
+        let data_path = if let Some(data_path) = data_path {
+            Some(data_path)
+        } else{
+            None
+        };
+
         Self {
             aircraft: Aircraft::new(
                 aircraft_name,
                 initial_position,
                 initial_velocity,
                 initial_attitude,
-                initial_rates
+                initial_rates,
+                data_path
             )
         }
     }
@@ -162,13 +170,15 @@ impl PyAircraft {
         let velocity = Vector3::new(airspeed, 0.0, 0.0);
         let attitude = UnitQuaternion::from_euler_angles(0.0, 0.0, heading);
         let rates = Vector3::zeros();
+        let data_path = self.data_path;
 
         self.aircraft = Aircraft::new(
             aircraft_name,
             pos,
             velocity,
             attitude,
-            rates
+            rates,
+            data_path
         );
     }
 

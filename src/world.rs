@@ -32,7 +32,8 @@ impl PyWorld {
         let vel = aircraft.aircraft.velocity();
         let att = aircraft.aircraft.attitude();
         let rates = aircraft.aircraft.rates();
-        let ac = Aircraft::new(&name, pos, vel, att, rates);
+        let data_dir = aircraft.data_dir;
+        let ac = Aircraft::new(&name, pos, vel, att, rates, data_dir);
         
         self.world.add_aircraft(ac);
     }
