@@ -20,6 +20,8 @@ jobs:
       matrix:
         target: [x86_64, x86, aarch64, armv7, s390x, ppc64le]
     steps:
+      - name: Add apt
+        run: sudo apt install -y cmake pkg-config libfreetype6-dev libfontconfig1-dev libxcb-xfixes0-dev libxkbcommon-dev python3
       - uses: actions/checkout@v3
         with:
           submodules: recursive
