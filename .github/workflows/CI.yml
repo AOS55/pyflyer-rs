@@ -15,15 +15,15 @@ permissions:
 
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     strategy:
       matrix:
         target: [x86_64, x86, aarch64, armv7, s390x, ppc64le]
     steps:
-      - uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: cmake pkg-config libfreetype6-dev libfontconfig1-dev libxcb-xfixes0-dev libxkbcommon-dev python3 fontconfig-config fontconfig vflib3-dev
-          version: 1.0
+      # - uses: awalsh128/cache-apt-pkgs-action@latest
+      #   with:
+      #     packages: cmake pkg-config libfreetype6-dev libfontconfig1-dev libxcb-xfixes0-dev libxkbcommon-dev python3 fontconfig-config fontconfig vflib3-dev
+      #     version: 1.0
       # - name: Add apt
       #   run: |
       #     sudo apt install -y cmake pkg-config libfreetype6-dev libfontconfig1-dev libxcb-xfixes0-dev libxkbcommon-dev python3 fontconfig-config fontconfig vflib3-dev
