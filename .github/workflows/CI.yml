@@ -25,6 +25,9 @@ jobs:
       matrix:
         target: [x86_64, x86, aarch64, armv7, s390x, ppc64le]
     steps:
+      - name: Install apt dependancy
+          run: |
+            apt-get install libfontconfig libfontconfig1-dev
       - uses: actions/checkout@v3
         with:
           submodules: recursive
