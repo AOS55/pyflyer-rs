@@ -33,7 +33,7 @@ jobs:
         run: |
           export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig/fontconfig.pc:$PKG_CONFIG_PATH
           echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
-
+          echo $GITHUB_ENV_VAR
       - uses: actions/checkout@v3
         with:
           submodules: recursive
