@@ -170,7 +170,7 @@ impl PyAircraft {
         let velocity = Vector3::new(airspeed, 0.0, 0.0);
         let attitude = UnitQuaternion::from_euler_angles(0.0, 0.0, heading);
         let rates = Vector3::zeros();
-        let data_path = self.data_path;
+        let data_path = self.aircraft.data_path.clone();
 
         self.aircraft = Aircraft::new(
             aircraft_name,
