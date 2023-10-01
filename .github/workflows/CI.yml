@@ -27,8 +27,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install apt dependancy
-          run: |
-            apt-get install libfontconfig libfontconfig1-dev
+          run: sudo apt-get install -y libfontconfig libfontconfig1-dev
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
