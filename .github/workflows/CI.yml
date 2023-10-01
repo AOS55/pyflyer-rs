@@ -28,6 +28,10 @@ jobs:
           python-version: '3.10'
       - name: Install dependency
         run: sudo apt install -y libfontconfig libfontconfig-dev libfontconfig1-dev pkgconf
+      - name: Apt upgrade
+        run: sudo apt -y upgrade
+      - name: Apt update
+        run: sudo apt -y update
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
