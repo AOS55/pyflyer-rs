@@ -3,6 +3,7 @@ use flyer::Aircraft;
 use flyer::World;
 use crate::PyAircraft;
 use aerso::types::*;
+use std::path::PathBuf;
 
 #[pyclass(name="World", unsendable)]
 pub struct PyWorld {
@@ -81,6 +82,16 @@ impl PyWorld {
     #[getter]
     fn get_screen_height(&mut self) -> PyResult<f32> {
         Ok(self.world.screen_dims[0])
+    }
+
+    #[setter]
+    fn set_assets_dir(&mut self, asset_dir: PathBuf) {
+        self.world.set_assets_dir(asset_dir)
+    }
+
+    #[getter]
+    fn get_assets_dir(&mut self) -> PyResult<PathBuf> {
+        Ok(PathBuf::from(&self.world.assets_dir))
     }
     
 }
