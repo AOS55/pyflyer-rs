@@ -33,8 +33,9 @@ impl PyWorld {
         let vel = aircraft.aircraft.velocity();
         let att = aircraft.aircraft.attitude();
         let rates = aircraft.aircraft.rates();
+        let controls = Some(aircraft.aircraft.controls.clone());
         let data_path = aircraft.aircraft.data_path.clone();
-        let ac = Aircraft::new(&name, pos, vel, att, rates, data_path);
+        let ac = Aircraft::new(&name, pos, vel, att, rates, controls, data_path);
         
         self.world.add_aircraft(ac);
     }
@@ -62,14 +63,7 @@ impl PyWorld {
     #[getter]
     fn get_vehicles(&self) -> PyResult<Vec<PyAircraft>> {
 
-        let controls = HashMap::from([
-            ("aileron".to_string(), 0.0),
-            ("elevator".to_string(), 0.0),
-            ("tla".to_string(), 0.0),
-            ("rudder".to_string(), 0.0)
-        ]);
-
-        let vehicles = self.world.vehicles.iter().map(|ac| PyAircraft{aircraft: ac.clone(), controls: controls.clone()}).collect();
+        let vehicles = self.world.vehicles.iter().map(|ac| PyAircraft{aircraft: ac.clone()}).collect();
         Ok(vehicles)
     }
 

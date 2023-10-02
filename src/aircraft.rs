@@ -13,8 +13,7 @@ use nalgebra::dvector;
 
 #[pyclass(name="Aircraft", unsendable)]
 pub struct PyAircraft {
-    pub aircraft: Aircraft,
-    pub controls: HashMap<String, f64>
+    pub aircraft: Aircraft
 }
 
 #[pymethods]
@@ -95,6 +94,17 @@ impl PyAircraft {
         Ok(crashed)
     }
 
+    #[getter]
+    fn get_controls(&self) -> PyResult<HashMap<String, f64>> {
+        Ok(self.aircraft.controls.clone())
+    }
+
+    #[setter]
+    /// made available, but `act` method is the preference
+    fn set_controls(&mut self, controls: HashMap<String, f64>) {
+        self.aircraft.controls = controls.clone()
+    }
+
     #[new]
     fn new(
         aircraft_name: Option<&str>,
@@ -141,12 +151,12 @@ impl PyAircraft {
             None
         };
 
-        let controls = HashMap::from([
+        let controls = Some(HashMap::from([
             ("aileron".to_string(), 0.0),
             ("elevator".to_string(), 0.0),
             ("tla".to_string(), 0.0),
             ("rudder".to_string(), 0.0)
-        ]);
+        ]));
 
         Self {
             aircraft: Aircraft::new(
@@ -155,9 +165,9 @@ impl PyAircraft {
                 initial_velocity,
                 initial_attitude,
                 initial_rates,
+                controls,
                 data_path
-            ),
-            controls
+            )
         }
     }
 
@@ -179,6 +189,14 @@ impl PyAircraft {
         let velocity = Vector3::new(airspeed, 0.0, 0.0);
         let attitude = UnitQuaternion::from_euler_angles(0.0, 0.0, heading);
         let rates = Vector3::zeros();
+
+        let controls = Some(HashMap::from([
+            ("aileron".to_string(), 0.0),
+            ("elevator".to_string(), 0.0),
+            ("tla".to_string(), 0.0),
+            ("rudder".to_string(), 0.0)
+        ])); 
+
         let data_path = self.aircraft.data_path.clone();
 
         self.aircraft = Aircraft::new(
@@ -187,19 +205,19 @@ impl PyAircraft {
             velocity,
             attitude,
             rates,
+            controls,
             data_path
         );
     }
 
     /// Propogate the vehicle given its action
     fn step(&mut self, dt: f64) {
-        let controls: Vec<_> = self.controls.values().cloned().collect();
-        self.aircraft.aff_body.step(dt, &controls);
+        self.aircraft.step(dt)
     }
 
     /// Set the aircraft's action
     fn act(&mut self, controls: HashMap<String, f64>){
-        self.controls = controls
+        self.aircraft.act(controls)
     }
 
     fn trim(&mut self, alt: f64, airspeed: f64, n_iters: u64) -> PyResult<Vec<f64>> {
