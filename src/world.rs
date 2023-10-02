@@ -4,7 +4,6 @@ use flyer::World;
 use crate::PyAircraft;
 use aerso::types::*;
 use std::path::PathBuf;
-use std::collections::HashMap;
 
 #[pyclass(name="World", unsendable)]
 pub struct PyWorld {
