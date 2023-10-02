@@ -13,7 +13,8 @@ use nalgebra::dvector;
 
 #[pyclass(name="Aircraft", unsendable)]
 pub struct PyAircraft {
-    pub aircraft: Aircraft
+    pub aircraft: Aircraft,
+    pub controls: HashMap<String, f64>
 }
 
 #[pymethods]
@@ -140,6 +141,13 @@ impl PyAircraft {
             None
         };
 
+        let controls = HashMap::from([
+            ("aileron".to_string(), 0.0),
+            ("elevator".to_string(), 0.0),
+            ("tla".to_string(), 0.0),
+            ("rudder".to_string(), 0.0)
+        ]);
+
         Self {
             aircraft: Aircraft::new(
                 aircraft_name,
@@ -148,7 +156,8 @@ impl PyAircraft {
                 initial_attitude,
                 initial_rates,
                 data_path
-            )
+            ),
+            controls
         }
     }
 
@@ -182,8 +191,15 @@ impl PyAircraft {
         );
     }
 
-    fn step(&mut self, dt: f64, input: Vec<f64>) {
-        self.aircraft.aff_body.step(dt, &input);
+    /// Propogate the vehicle given its action
+    fn step(&mut self, dt: f64) {
+        let controls: Vec<_> = self.controls.values().cloned().collect();
+        self.aircraft.aff_body.step(dt, &controls);
+    }
+
+    /// Set the aircraft's action
+    fn act(&mut self, controls: HashMap<String, f64>){
+        self.controls = controls
     }
 
     fn trim(&mut self, alt: f64, airspeed: f64, n_iters: u64) -> PyResult<Vec<f64>> {

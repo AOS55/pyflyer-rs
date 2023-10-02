@@ -4,6 +4,7 @@ use flyer::World;
 use crate::PyAircraft;
 use aerso::types::*;
 use std::path::PathBuf;
+use std::collections::HashMap;
 
 #[pyclass(name="World", unsendable)]
 pub struct PyWorld {
@@ -60,7 +61,15 @@ impl PyWorld {
 
     #[getter]
     fn get_vehicles(&self) -> PyResult<Vec<PyAircraft>> {
-        let vehicles = self.world.vehicles.iter().map(|ac| PyAircraft{aircraft: ac.clone()}).collect();
+
+        let controls = HashMap::from([
+            ("aileron".to_string(), 0.0),
+            ("elevator".to_string(), 0.0),
+            ("tla".to_string(), 0.0),
+            ("rudder".to_string(), 0.0)
+        ]);
+
+        let vehicles = self.world.vehicles.iter().map(|ac| PyAircraft{aircraft: ac.clone(), controls: controls.clone()}).collect();
         Ok(vehicles)
     }
 
