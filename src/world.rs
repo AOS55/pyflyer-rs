@@ -1,9 +1,9 @@
 use pyo3::prelude::*;
-use flyer::Aircraft;
 use flyer::World;
 use crate::PyAircraft;
 use aerso::types::*;
 use std::path::PathBuf;
+use std::collections::HashMap;
 
 #[pyclass(name="World", unsendable)]
 pub struct PyWorld {
@@ -26,17 +26,8 @@ impl PyWorld {
         &mut self,
         aircraft: &PyAircraft
     ) {
-        
-        let name = &aircraft.aircraft.name;
-        let pos = aircraft.aircraft.position();
-        let vel = aircraft.aircraft.velocity();
-        let att = aircraft.aircraft.attitude();
-        let rates = aircraft.aircraft.rates();
-        let controls = Some(aircraft.aircraft.controls.clone());
-        let data_path = aircraft.aircraft.data_path.clone();
-        let ac = Aircraft::new(&name, pos, vel, att, rates, controls, data_path);
-        
-        self.world.add_aircraft(ac);
+        let ac = &aircraft.aircraft;
+        self.world.add_aircraft(ac.clone());
     }
 
     fn create_map(
@@ -49,18 +40,27 @@ impl PyWorld {
         self.world.create_map(seed, area, scaling, water_present);
     }
 
+    fn step(&mut self, dt: f64) {
+        self.world.vehicles[0].step(dt);
+        for vid in 0..self.world.vehicles.len() {
+            self.world.vehicles[vid].step(dt);
+        }
+    }
+
+    fn act(&mut self, controls: Vec<HashMap<String, f64>>) {
+        for vid in 0..self.world.vehicles.len() {
+            self.world.vehicles[vid].act(controls[vid].clone());
+        }
+    }
+    
     fn render(&mut self) -> Vec<u8> {
-       let pixmap = self.world.render();
-    //    pixmap.encode_png().unwrap()
+
+        let pixmap = self.world.render();
         pixmap.data().to_vec()
     }
 
-    // fn get_image(&mut self) -> Vec<u8> {
-    //     self.world.get_image()
-    // }
-
     #[getter]
-    fn get_vehicles(&self) -> PyResult<Vec<PyAircraft>> {
+    fn get_vehicles(&mut self) -> PyResult<Vec<PyAircraft>> {
 
         let vehicles = self.world.vehicles.iter().map(|ac| PyAircraft{aircraft: ac.clone()}).collect();
         Ok(vehicles)
@@ -93,8 +93,19 @@ impl PyWorld {
     }
 
     #[getter]
-    fn get_assets_dir(&mut self) -> PyResult<PathBuf> {
+    fn get_assets_dir(&self) -> PyResult<PathBuf> {
         Ok(PathBuf::from(&self.world.assets_dir))
+    }
+
+    #[getter]
+    fn get_camera_pos(&self) -> PyResult<Vec<f64>> {
+        let camera_pos = vec![self.world.camera.x, self.world.camera.y, self.world.camera.z];
+        Ok(camera_pos)
+    }
+
+    #[setter]
+    fn set_camera_pos(&mut self, pos: Vec<f64>) {
+        self.world.camera.move_camera(pos);
     }
     
 }
