@@ -220,6 +220,14 @@ impl PyAircraft {
         self.aircraft.act(controls)
     }
 
+    fn goal_dist(&self, goal: Vec<f64>) -> f64 {
+        let ac_pos = self.aircraft.position();
+        let dx = ac_pos[0] - goal[0];
+        let dy = ac_pos[1] - goal[1];
+        let dz = ac_pos[2] - goal[2];
+        ((dx * dx) + (dy * dy) + (dz * dz)).sqrt()
+    }
+
     fn trim(&mut self, alt: f64, airspeed: f64, n_iters: u64) -> PyResult<Vec<f64>> {
         
         let cost = Trim {
