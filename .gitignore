@@ -73,3 +73,6 @@ docs/_build/
 
 # Ignore resources
 resources/
+
+# Ignore terrain_data configs
+terrain_data/
