@@ -1,14 +1,15 @@
 use pyo3::prelude::*;
+use pyo3::exceptions::PyAttributeError;
 use flyer::World;
 use crate::PyAircraft;
 use std::path::PathBuf;
 use std::collections::HashMap;
+use glam::Vec2;
 
 #[pyclass(name="World", unsendable)]
 pub struct PyWorld {
     world: World
 }
-
 #[pymethods]
 impl PyWorld {
 
@@ -27,6 +28,45 @@ impl PyWorld {
     ) {
         let ac = &aircraft.aircraft;
         self.world.add_aircraft(ac.clone());
+    }
+
+    fn add_runway(
+        &mut self,
+        runway_position: Option<Vec<f32>>,
+        runway_width: Option<f32>,
+        runway_length: Option<f32>,
+        runway_heading: Option<f32>,
+    ) {
+        self.world.create_runway();
+
+        match runway_position {
+            Some(runway_position) => {
+                self.world.runway.as_mut().unwrap().pos = Vec2::new(runway_position[0], runway_position[1]);
+            },
+            None => ()
+        }
+
+        match runway_width {
+            Some(runway_width) => {
+                self.world.runway.as_mut().unwrap().dims[0] = runway_width;
+            },
+            None => ()
+        }
+
+        match runway_length {
+            Some(runway_length) => {
+                self.world.runway.as_mut().unwrap().dims[1] = runway_length;
+            },
+            None => ()
+        }
+
+        match runway_heading {
+            Some(runway_heading) => {
+                self.world.runway.as_mut().unwrap().heading = runway_heading;
+            },
+            None => ()
+        }
+
     }
 
     fn create_map(
@@ -56,6 +96,18 @@ impl PyWorld {
 
         let pixmap = self.world.render();
         pixmap.data().to_vec()
+    }
+
+    fn point_on_runway(&self, point: Vec<f32>) -> PyResult<bool> {
+    
+        match &self.world.runway {
+            Some(runway) => {
+                Ok(runway.on_runway(Vec2::new(point[0], point[1])))
+            },
+            None => {
+                Err(PyAttributeError::new_err("No runway in world, call `add_runway` first"))
+            }
+        }
     }
 
     #[getter]
@@ -94,6 +146,16 @@ impl PyWorld {
     #[getter]
     fn get_assets_dir(&self) -> PyResult<PathBuf> {
         Ok(PathBuf::from(&self.world.assets_dir))
+    }
+
+    #[setter]
+    fn set_terrain_data_dir(&mut self, terrain_data_dir: PathBuf) {
+        self.world.set_terrain_data_dir(terrain_data_dir)
+    }
+
+    #[getter]
+    fn get_terrain_data_dir(&self) -> PyResult<PathBuf> {
+        Ok(PathBuf::from(&self.world.terrain_data_dir))
     }
 
     #[getter]
