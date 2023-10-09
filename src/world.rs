@@ -110,6 +110,19 @@ impl PyWorld {
         }
     }
 
+    fn touchdown_points(&self) -> PyResult<HashMap<String, Vec<f32>>> {
+
+        match &self.world.runway{
+            Some(runway) => {
+                Ok(runway.approach_points())
+            },
+            None => {
+                Err(PyAttributeError::new_err("No runway in world, call `add_runway` first"))
+            }
+        }
+
+    }
+
     #[getter]
     fn get_vehicles(&mut self) -> PyResult<Vec<PyAircraft>> {
 
