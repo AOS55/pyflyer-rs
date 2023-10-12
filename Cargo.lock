@@ -408,6 +408,7 @@ dependencies = [
  "rand_seeder",
  "rayon",
  "serde",
+ "serde_json",
  "serde_yaml",
  "tiny-skia",
 ]
@@ -475,6 +476,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5418c17512bdf42730f9032c74e1ae39afc408745ebb2acf72fbc4691c17945"
 dependencies = [
  "mint",
+ "serde",
 ]
 
 [[package]]
@@ -946,6 +948,7 @@ dependencies = [
  "aerso",
  "argmin",
  "flyer-rs",
+ "glam",
  "nalgebra 0.32.3",
  "pyo3",
  "tiny-skia",
