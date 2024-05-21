@@ -30,6 +30,11 @@ impl PyWorld {
         self.world.add_aircraft(ac.clone());
     }
 
+    fn update_aircraft(&mut self, aircraft: &PyAircraft, id: usize) {
+        let ac = &aircraft.aircraft;
+        self.world.update_aircraft(ac.clone(), id);
+    }
+
     fn add_runway(
         &mut self,
         runway_position: Option<Vec<f32>>,
@@ -120,12 +125,10 @@ impl PyWorld {
                 Err(PyAttributeError::new_err("No runway in world, call `add_runway` first"))
             }
         }
-
     }
 
     #[getter]
     fn get_vehicles(&mut self) -> PyResult<Vec<PyAircraft>> {
-
         let vehicles = self.world.vehicles.iter().map(|ac| PyAircraft{aircraft: ac.clone()}).collect();
         Ok(vehicles)
     }
@@ -180,6 +183,16 @@ impl PyWorld {
     #[setter]
     fn set_camera_pos(&mut self, pos: Vec<f64>) {
         self.world.camera.move_camera(pos);
+    }
+
+    #[setter]
+    fn set_render_type(&mut self, render_type: String){
+        self.world.render_type = render_type;
+    }
+
+    #[getter]
+    fn get_render_type(&self) -> PyResult<String> {
+        Ok(self.world.render_type.to_string())
     }
     
 }
