@@ -80,7 +80,7 @@ impl PyAircraft {
                 true
             } else if self.aircraft.velocity()[2] > 60.0 {
                 true
-            } else if (-5.0 * PI/180.0) < euler.0 {
+            } else if (-5.0 * PI/180.0) > euler.0 {
                 true
             } else if euler.0 > (30.0 * (PI/180.0)) {
                 true
