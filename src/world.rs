@@ -4,7 +4,7 @@ use flyer::World;
 use crate::PyAircraft;
 use std::path::PathBuf;
 use std::collections::HashMap;
-use glam::Vec2;
+use glam::{Vec2, Vec3};
 
 #[pyclass(name="World", unsendable)]
 pub struct PyWorld {
@@ -72,6 +72,16 @@ impl PyWorld {
             None => ()
         }
 
+    }
+
+    fn set_goal(
+        &mut self,
+        goal_x: f32,
+        goal_y: f32,
+        goal_z: f32
+    ) {
+        let position = Vec3::new(goal_x, goal_y, goal_z);        
+        self.world.set_goal(position);
     }
 
     fn create_map(
