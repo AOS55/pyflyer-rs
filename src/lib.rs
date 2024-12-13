@@ -1,15 +1,10 @@
 use pyo3::prelude::*;
 
-mod aircraft;
-use aircraft::PyAircraft;
-
-mod world;
-use world::PyWorld;
+mod gym;
+mod utils;
 
 #[pymodule]
-#[pyo3(name = "pyflyer")]
-fn my_module(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    m.add_class::<PyAircraft>()?;
-    m.add_class::<PyWorld>()?;
+fn pyflyer(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_class::<gym::FlyerEnv>()?;
     Ok(())
 }
