@@ -9,6 +9,7 @@ pub enum ConfigError {
     InvalidParameter { name: String, value: String },
     MissingRequired(String),
     ValidationError(String),
+    PythonError(String),
 }
 
 impl fmt::Display for ConfigError {
@@ -21,6 +22,7 @@ impl fmt::Display for ConfigError {
             }
             ConfigError::MissingRequired(name) => write!(f, "Missing required parameter: {}", name),
             ConfigError::ValidationError(msg) => write!(f, "Validation error: {}", msg),
+            ConfigError::PythonError(msg) => write!(f, "Python error: {}", msg),
         }
     }
 }
@@ -28,5 +30,11 @@ impl fmt::Display for ConfigError {
 impl From<ConfigError> for PyErr {
     fn from(err: ConfigError) -> PyErr {
         PyValueError::new_err(err.to_string())
+    }
+}
+
+impl From<PyErr> for ConfigError {
+    fn from(err: PyErr) -> ConfigError {
+        ConfigError::PythonError(err.to_string())
     }
 }

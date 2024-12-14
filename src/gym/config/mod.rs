@@ -1,5 +1,5 @@
 use flyer::{
-    components::{AircraftConfig, PhysicsModel, TerminalConditions},
+    components::{AircraftConfig, TerminalConditions},
     resources::{EnvironmentConfig, PhysicsConfig, RewardWeights, TerrainConfig},
 };
 use pyo3::prelude::*;
@@ -24,8 +24,7 @@ pub struct EnvConfig {
     pub time_step: f64,
 
     // Aircraft Configuration
-    pub aircraft_config: AircraftConfig,
-    pub physics_model: PhysicsModel,
+    pub aircraft_configs: Vec<AircraftConfig>,
     pub physics_config: PhysicsConfig,
     pub environment_config: EnvironmentConfig,
 

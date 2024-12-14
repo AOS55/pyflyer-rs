@@ -1,6 +1,6 @@
-use flyer::components::PhysicsModel;
+use flyer::components::AircraftConfig;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyList};
 use rand;
 
 mod actions;
@@ -9,31 +9,49 @@ mod environment;
 mod observations;
 mod physics;
 mod reward;
+mod start;
 mod termination;
 mod terrain;
 
 use crate::gym::config::errors::ConfigError;
 use crate::gym::config::EnvConfig;
 use crate::utils::{RngManager, WithRng};
-use aircraft::AircraftConfigBuilder;
+use aircraft::{create_aircraft_builder, AircraftBuilder, AircraftBuilderEnum};
 use environment::EnvironmentConfigBuilder;
 use physics::PhysicsConfigBuilder;
 use reward::RewardWeightsBuilder;
+use start::RandomStartPosConfigBuilder;
 use termination::TerminalConditionsBuilder;
 use terrain::TerrainConfigBuilder;
 
-#[derive(Default)]
 pub struct EnvConfigBuilder {
     rng_manager: Option<RngManager>,
     max_episode_steps: Option<u32>,
     steps_per_action: Option<u32>,
     time_step: Option<f64>,
-    aircraft_builder: AircraftConfigBuilder,
+    aircraft_builders: Vec<AircraftBuilderEnum>,
     physics_builder: PhysicsConfigBuilder,
     environment_builder: EnvironmentConfigBuilder,
     terrain_builder: TerrainConfigBuilder,
     reward_builder: RewardWeightsBuilder,
     terminal_builder: TerminalConditionsBuilder,
+}
+
+impl Default for EnvConfigBuilder {
+    fn default() -> Self {
+        Self {
+            rng_manager: None,
+            max_episode_steps: None,
+            steps_per_action: None,
+            time_step: None,
+            aircraft_builders: Vec::new(),
+            physics_builder: PhysicsConfigBuilder::default(),
+            environment_builder: EnvironmentConfigBuilder::default(),
+            terrain_builder: TerrainConfigBuilder::default(),
+            reward_builder: RewardWeightsBuilder::default(),
+            terminal_builder: TerminalConditionsBuilder::default(),
+        }
+    }
 }
 
 impl EnvConfigBuilder {
@@ -61,8 +79,8 @@ impl EnvConfigBuilder {
         self
     }
 
-    pub fn aircraft_config(mut self, builder: AircraftConfigBuilder) -> Self {
-        self.aircraft_builder = builder;
+    pub fn aircraft_config(mut self, builder: AircraftBuilderEnum) -> Self {
+        self.aircraft_builders.push(builder);
         self
     }
 
@@ -86,7 +104,7 @@ impl EnvConfigBuilder {
             rand::random()
         };
         let rng_manager = RngManager::new(seed);
-        builder.rng_manager = Some(rng_manager);
+        builder.rng_manager = Some(rng_manager.clone());
 
         if let Some(steps) = dict.get_item("max_episode_steps")? {
             builder = builder.max_episode_steps(steps.extract()?);
@@ -98,13 +116,15 @@ impl EnvConfigBuilder {
             builder = builder.time_step(dt.extract()?);
         }
 
-        let rng_manager = RngManager::new(seed);
-
-        if let Some(aircraft_dict) = dict.get_item("aircraft_config")? {
-            if let Ok(dict) = aircraft_dict.downcast::<PyDict>() {
-                let mut config = AircraftConfigBuilder::from_pydict(&dict)?;
-                config = config.with_rng(rng_manager.get_rng("aircraft"));
-                builder = builder.aircraft_config(config);
+        if let Some(aircraft_list) = dict.get_item("aircraft_config")? {
+            if let Ok(aircraft_configs) = aircraft_list.downcast::<PyList>() {
+                for (i, aircraft_dict) in aircraft_configs.iter().enumerate() {
+                    if let Ok(config_dict) = aircraft_dict.downcast::<PyDict>() {
+                        let aircraft_builder = create_aircraft_builder(&config_dict)?
+                            .with_rng(rng_manager.get_rng(&format!("aircraft_{}", i)));
+                        builder.aircraft_builders.push(aircraft_builder);
+                    }
+                }
             }
         }
 
@@ -124,13 +144,18 @@ impl EnvConfigBuilder {
             .rng_manager
             .unwrap_or_else(|| RngManager::new(rand::random()));
 
+        let aircraft_configs = self
+            .aircraft_builders
+            .into_iter()
+            .map(|builder| builder.build())
+            .collect::<Result<Vec<AircraftConfig>, ConfigError>>()?;
+
         Ok(EnvConfig {
             seed: rng_manager.master_seed(),
             max_episode_steps: self.max_episode_steps.unwrap_or(1000),
             steps_per_action: self.steps_per_action.unwrap_or(4),
             time_step: self.time_step.unwrap_or(1.0 / 60.0),
-            aircraft_config: self.aircraft_builder.build()?,
-            physics_model: self.physics_builder.model.unwrap_or(PhysicsModel::Simple),
+            aircraft_configs,
             physics_config: self.physics_builder.build()?,
             environment_config: self.environment_builder.build()?,
             terrain_config: self.terrain_builder.build()?,

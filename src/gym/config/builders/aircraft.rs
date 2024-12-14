@@ -1,227 +1,329 @@
 use flyer::components::{
-    AircraftConfig, AircraftGeometry, AircraftType, DubinsAircraftConfig, MassModel, PhysicsModel,
+    AircraftAeroCoefficients, AircraftConfig, AircraftGeometry, AircraftType, DubinsAircraftConfig,
+    FullAircraftConfig, MassModel,
 };
+
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
-use crate::extract_or_default;
+use crate::gym::config::builders::RandomStartPosConfigBuilder;
 use crate::gym::config::errors::ConfigError;
 use crate::utils::WithRng;
 
-#[derive(Default)]
-pub struct AircraftConfigBuilder {
-    ac_type: Option<AircraftType>,
-    physics_model: Option<PhysicsModel>,
-    mass: Option<MassModel>,
-    geometry: Option<AircraftGeometry>,
+// Simplified to just one trait for building aircraft
+pub trait AircraftBuilder {
+    fn build(&self) -> Result<AircraftConfig, ConfigError>;
+}
+
+pub enum AircraftBuilderEnum {
+    Dubins(DubinsAircraftConfigBuilder),
+    Full(FullAircraftConfigBuilder),
+}
+
+impl AircraftBuilder for AircraftBuilderEnum {
+    fn build(&self) -> Result<AircraftConfig, ConfigError> {
+        match self {
+            AircraftBuilderEnum::Dubins(builder) => builder.build(),
+            AircraftBuilderEnum::Full(builder) => builder.build(),
+        }
+    }
+}
+
+impl WithRng for AircraftBuilderEnum {
+    fn with_rng(self, rng: ChaCha8Rng) -> Self {
+        match self {
+            AircraftBuilderEnum::Dubins(builder) => {
+                AircraftBuilderEnum::Dubins(builder.with_rng(rng))
+            }
+            AircraftBuilderEnum::Full(builder) => AircraftBuilderEnum::Full(builder.with_rng(rng)),
+        }
+    }
+}
+
+#[derive(Default, Debug)]
+pub struct DubinsAircraftConfigBuilder {
+    name: Option<String>,
+    max_speed: Option<f64>,
+    min_speed: Option<f64>,
+    acceleration: Option<f64>,
+    max_bank_angle: Option<f64>,
+    max_turn_rate: Option<f64>,
+    max_climb_rate: Option<f64>,
+    max_descent_rate: Option<f64>,
+    random_start_config: RandomStartPosConfigBuilder,
     rng: Option<ChaCha8Rng>,
 }
 
-impl WithRng for AircraftConfigBuilder {
+#[derive(Default, Debug)]
+pub struct FullAircraftConfigBuilder {
+    pub name: Option<String>,
+    pub ac_type: Option<AircraftType>,
+    pub mass: Option<MassModel>,
+    pub geometry: Option<AircraftGeometry>,
+    pub aero_coef: Option<AircraftAeroCoefficients>,
+    pub rng: Option<ChaCha8Rng>,
+}
+
+impl DubinsAircraftConfigBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn from_pydict(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
+        let mut builder = Self::new();
+        builder.name = dict.get_item("name")?.and_then(|v| v.extract().ok());
+
+        if let Ok(Some(config)) = dict.get_item("config") {
+            if let Ok(config_dict) = config.downcast::<PyDict>() {
+                builder.max_speed = config_dict
+                    .get_item("max_speed")?
+                    .and_then(|v| v.extract().ok());
+                builder.min_speed = config_dict
+                    .get_item("min_speed")?
+                    .and_then(|v| v.extract().ok());
+                builder.acceleration = config_dict
+                    .get_item("acceleration")?
+                    .and_then(|v| v.extract().ok());
+                builder.max_bank_angle = config_dict
+                    .get_item("max_bank_angle")?
+                    .and_then(|v| v.extract().ok());
+                builder.max_turn_rate = config_dict
+                    .get_item("max_turn_rate")?
+                    .and_then(|v| v.extract().ok());
+                builder.max_climb_rate = config_dict
+                    .get_item("max_climb_rate")?
+                    .and_then(|v| v.extract().ok());
+                builder.max_descent_rate = config_dict
+                    .get_item("max_descent_rate")?
+                    .and_then(|v| v.extract().ok());
+                builder.random_start_config = RandomStartPosConfigBuilder::from_pydict(dict)?;
+            }
+        }
+
+        Ok(builder)
+    }
+}
+
+impl AircraftBuilder for DubinsAircraftConfigBuilder {
+    fn build(&self) -> Result<AircraftConfig, ConfigError> {
+        let default_config = DubinsAircraftConfig::default();
+
+        let random_start_config = if let Some(rng) = &self.rng {
+            self.random_start_config
+                .clone()
+                .with_rng(rng.clone())
+                .build()
+        } else {
+            self.random_start_config.clone().build()
+        };
+
+        Ok(AircraftConfig::Dubins(DubinsAircraftConfig {
+            name: self
+                .name
+                .clone()
+                .unwrap_or_else(|| "unnamed_dubins".to_string()),
+            max_speed: self.max_speed.unwrap_or(default_config.max_speed),
+            min_speed: self.min_speed.unwrap_or(default_config.min_speed),
+            acceleration: self.acceleration.unwrap_or(default_config.acceleration),
+            max_bank_angle: self.max_bank_angle.unwrap_or(default_config.max_bank_angle),
+            max_turn_rate: self.max_turn_rate.unwrap_or(default_config.max_turn_rate),
+            max_climb_rate: self.max_climb_rate.unwrap_or(default_config.max_climb_rate),
+            max_descent_rate: self
+                .max_descent_rate
+                .unwrap_or(default_config.max_descent_rate),
+            random_start_config: Some(random_start_config),
+        }))
+    }
+}
+
+impl WithRng for DubinsAircraftConfigBuilder {
     fn with_rng(mut self, rng: ChaCha8Rng) -> Self {
         self.rng = Some(rng);
         self
     }
 }
 
-impl AircraftConfigBuilder {
+impl FullAircraftConfigBuilder {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn physics_model(mut self, physics_model: PhysicsModel) -> Self {
-        self.physics_model = Some(physics_model);
-        self
-    }
-
-    pub fn aircraft_type(mut self, ac_type: AircraftType) -> Self {
-        self.ac_type = Some(ac_type);
-        self
-    }
-
-    pub fn mass(mut self, mass: MassModel) -> Self {
-        self.mass = Some(mass);
-        self
-    }
-
-    pub fn geometry(mut self, geometry: AircraftGeometry) -> Self {
-        self.geometry = Some(geometry);
-        self
-    }
-
     pub fn from_pydict(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
         let mut builder = Self::new();
+        builder.name = dict
+            .get_item("name")?
+            .and_then(|v| v.extract::<String>().ok());
 
-        if let Ok(Some(physics_model)) = dict.get_item("physics_model") {
-            if let Ok(model_str) = physics_model.extract::<&str>() {
-                builder = builder.physics_model(match model_str {
-                    "full" => PhysicsModel::Full,
-                    "simple" => PhysicsModel::Simple,
-                    _ => {
-                        eprintln!("Warning: Unsupported physics_model value '{}'. Defaulting to 'Simple'.", model_str);
-                        PhysicsModel::Simple
-                    },
-                });
-            } else {
-                eprintln!("Warning: physics_model is not a valid string. Defaulting to 'Simple'.");
-                builder = builder.physics_model(PhysicsModel::Simple);
-            }
-        } else {
-            builder = builder.physics_model(PhysicsModel::Simple);
-        }
-
-        match builder.physics_model {
-            Some(PhysicsModel::Simple) | None => {
-                if let Some(aircraft_config) = dict.get_item("aircraft_config")? {
-                    if let Ok(config_dict) = aircraft_config.downcast::<PyDict>() {
-                        let default = DubinsAircraftConfig::default();
-                        let dubins_config = DubinsAircraftConfig {
-                            max_speed: extract_or_default!(
-                                config_dict,
-                                "max_speed",
-                                default.max_speed
-                            ),
-                            min_speed: extract_or_default!(
-                                config_dict,
-                                "min_speed",
-                                default.min_speed
-                            ),
-                            acceleration: extract_or_default!(
-                                config_dict,
-                                "acceleration",
-                                default.acceleration
-                            ),
-                            max_bank_angle: extract_or_default!(
-                                config_dict,
-                                "max_bank_angle",
-                                default.max_bank_angle
-                            ),
-                            max_turn_rate: extract_or_default!(
-                                config_dict,
-                                "max_turn_rate",
-                                default.max_turn_rate
-                            ),
-                            max_climb_rate: extract_or_default!(
-                                config_dict,
-                                "max_climb_rate",
-                                default.max_climb_rate
-                            ),
-                            max_descent_rate: extract_or_default!(
-                                config_dict,
-                                "max_descent_rate",
-                                default.max_descent_rate
-                            ),
-                        };
-                    }
-                }
-            }
-            Some(PhysicsModel::Full) => {
-                if let Some(type_str) = dict
-                    .get_item("type")?
+        if let Ok(Some(config)) = dict.get_item("config") {
+            if let Ok(config_dict) = config.downcast::<PyDict>() {
+                // Aircraft type
+                if let Some(type_str) = config_dict
+                    .get_item("ac_type")?
                     .and_then(|t| t.extract::<String>().ok())
                 {
-                    if let Some(type_str) = dict
-                        .get_item("type")?
-                        .and_then(|t| t.extract::<String>().ok())
+                    builder.ac_type = Some(match type_str.as_str() {
+                        "twin_otter" => AircraftType::TwinOtter,
+                        "f4_phantom" => AircraftType::F4Phantom,
+                        _ => AircraftType::GenericTransport,
+                    });
+                }
+
+                // Parse mass and geometry configurations
+                if let Ok(Some(mass_dict)) = config_dict.get_item("mass") {
+                    if let Ok(mass_dict) = mass_dict.downcast::<PyDict>() {
+                        builder.mass = parse_mass_dict(&mass_dict)?;
+                    }
+                }
+
+                if let Ok(Some(geom_dict)) = config_dict.get_item("geometry") {
+                    if let Ok(geom_dict) = geom_dict.downcast::<PyDict>() {
+                        builder.geometry = parse_geometry_dict(&geom_dict)?;
+                    }
+                }
+
+                // Handle aero coefficients based on aircraft type
+                builder.aero_coef = Some(
+                    match builder
+                        .ac_type
+                        .as_ref()
+                        .unwrap_or(&AircraftType::GenericTransport)
                     {
-                        builder = builder.aircraft_type(match type_str.as_str() {
-                            "twin_otter" => AircraftType::TwinOtter,
-                            "f4_phantom" => AircraftType::F4Phantom,
-                            "generic_transport" => AircraftType::GenericTransport,
-                            _ => AircraftType::Custom(type_str),
-                        });
-                    }
-                }
-
-                let ac_type = builder
-                    .ac_type
-                    .clone()
-                    .unwrap_or(AircraftType::GenericTransport);
-
-                let default_config = match ac_type {
-                    AircraftType::TwinOtter => AircraftConfig::twin_otter(),
-                    AircraftType::F4Phantom => AircraftConfig::f4_phantom(),
-                    AircraftType::GenericTransport => AircraftConfig::generic_transport(),
-                    AircraftType::Custom(name) => AircraftConfig {
-                        ac_type: AircraftType::Custom(name),
-                        ..AircraftConfig::default()
+                        AircraftType::TwinOtter => AircraftAeroCoefficients::twin_otter(),
+                        AircraftType::F4Phantom => AircraftAeroCoefficients::f4_phantom(),
+                        _ => AircraftAeroCoefficients::generic_transport(),
                     },
-                };
-
-                // Handle mass configuration
-                if let Some(mass) = dict.get_item("mass")? {
-                    if let Ok(mass_dict) = mass.downcast::<PyDict>() {
-                        if let (Some(mass), Some(ixx), Some(iyy), Some(izz), Some(ixz)) = (
-                            mass_dict
-                                .get_item("mass")?
-                                .and_then(|m| m.extract::<f64>().ok()),
-                            mass_dict
-                                .get_item("ixx")?
-                                .and_then(|i| i.extract::<f64>().ok()),
-                            mass_dict
-                                .get_item("iyy")?
-                                .and_then(|i| i.extract::<f64>().ok()),
-                            mass_dict
-                                .get_item("izz")?
-                                .and_then(|i| i.extract::<f64>().ok()),
-                            mass_dict
-                                .get_item("ixz")?
-                                .and_then(|i| i.extract::<f64>().ok()),
-                        ) {
-                            builder = builder.mass(MassModel::new(mass, ixx, iyy, izz, ixz));
-                        }
-                    }
-                }
-
-                // Handle geometry configuration
-                if let Some(geom) = dict.get_item("geometry")? {
-                    if let Ok(geom_dict) = geom.downcast::<PyDict>() {
-                        let geometry = AircraftGeometry::new(
-                            geom_dict
-                                .get_item("wing_area")?
-                                .and_then(|w| w.extract().ok())
-                                .unwrap_or(default_config.geometry.wing_area),
-                            geom_dict
-                                .get_item("wing_span")?
-                                .and_then(|w| w.extract().ok())
-                                .unwrap_or(default_config.geometry.wing_span),
-                            geom_dict
-                                .get_item("mac")?
-                                .and_then(|m| m.extract().ok())
-                                .unwrap_or(default_config.geometry.mac),
-                        );
-                        builder = builder.geometry(geometry);
-                    }
-                }
+                );
             }
         }
 
         Ok(builder)
     }
+}
 
-    pub fn build(self) -> Result<AircraftConfig, ConfigError> {
-        let _rng = self.rng.unwrap_or_else(|| ChaCha8Rng::from_entropy());
+impl AircraftBuilder for FullAircraftConfigBuilder {
+    fn build(&self) -> Result<AircraftConfig, ConfigError> {
+        let ac_type = self
+            .ac_type
+            .clone()
+            .unwrap_or(AircraftType::GenericTransport);
+        let name = self.name.clone().unwrap_or_else(|| {
+            format!(
+                "unnamed_{}",
+                match ac_type {
+                    AircraftType::TwinOtter => "twin_otter",
+                    AircraftType::F4Phantom => "f4",
+                    _ => "generic",
+                }
+            )
+        });
 
-        let mut config = match self.ac_type.unwrap_or(AircraftType::GenericTransport) {
-            AircraftType::TwinOtter => AircraftConfig::twin_otter(),
-            AircraftType::F4Phantom => AircraftConfig::f4_phantom(),
-            AircraftType::GenericTransport => AircraftConfig::generic_transport(),
-            AircraftType::Custom(name) => AircraftConfig {
-                ac_type: AircraftType::Custom(name),
-                ..AircraftConfig::default()
-            },
+        let config = FullAircraftConfig {
+            name,
+            ac_type: ac_type.clone(),
+            mass: self.mass.clone().unwrap_or_else(|| match ac_type {
+                AircraftType::TwinOtter => MassModel::twin_otter(),
+                AircraftType::F4Phantom => MassModel::f4_phantom(),
+                _ => MassModel::generic_transport(),
+            }),
+            geometry: self.geometry.clone().unwrap_or_else(|| match ac_type {
+                AircraftType::TwinOtter => AircraftGeometry::twin_otter(),
+                AircraftType::F4Phantom => AircraftGeometry::f4_phantom(),
+                _ => AircraftGeometry::generic_transport(),
+            }),
+            aero_coef: self.aero_coef.clone().unwrap_or_else(|| match ac_type {
+                AircraftType::TwinOtter => AircraftAeroCoefficients::twin_otter(),
+                AircraftType::F4Phantom => AircraftAeroCoefficients::f4_phantom(),
+                _ => AircraftAeroCoefficients::generic_transport(),
+            }),
         };
 
-        if let Some(mass) = self.mass {
-            config.mass = mass;
-        }
+        Ok(AircraftConfig::Full(config))
+    }
+}
 
-        if let Some(geometry) = self.geometry {
-            config.geometry = geometry;
-        }
+impl WithRng for FullAircraftConfigBuilder {
+    fn with_rng(mut self, rng: ChaCha8Rng) -> Self {
+        self.rng = Some(rng);
+        self
+    }
+}
 
-        Ok(config)
+// Helper functions to parse configuration
+fn parse_mass_dict(mass_dict: &Bound<'_, PyDict>) -> PyResult<Option<MassModel>> {
+    let mass = mass_dict.get_item("mass")?.and_then(|v| v.extract().ok());
+    let ixx = mass_dict.get_item("ixx")?.and_then(|v| v.extract().ok());
+    let iyy = mass_dict.get_item("iyy")?.and_then(|v| v.extract().ok());
+    let izz = mass_dict.get_item("izz")?.and_then(|v| v.extract().ok());
+    let ixz = mass_dict.get_item("ixz")?.and_then(|v| v.extract().ok());
+
+    match (mass, ixx, iyy, izz, ixz) {
+        (Some(mass), Some(ixx), Some(iyy), Some(izz), Some(ixz)) => {
+            Ok(Some(MassModel::new(mass, ixx, iyy, izz, ixz)))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn parse_geometry_dict(geom_dict: &Bound<'_, PyDict>) -> PyResult<Option<AircraftGeometry>> {
+    let wing_area = geom_dict
+        .get_item("wing_area")?
+        .and_then(|v| v.extract().ok());
+    let wing_span = geom_dict
+        .get_item("wing_span")?
+        .and_then(|v| v.extract().ok());
+    let mac = geom_dict.get_item("mac")?.and_then(|v| v.extract().ok());
+
+    match (wing_area, wing_span, mac) {
+        (Some(wing_area), Some(wing_span), Some(mac)) => {
+            Ok(Some(AircraftGeometry::new(wing_area, wing_span, mac)))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn get_default_full_config(ac_type: &AircraftType, name: Option<String>) -> FullAircraftConfig {
+    match ac_type {
+        AircraftType::TwinOtter => FullAircraftConfig {
+            name: name.unwrap_or_else(|| "unnamed_twin_otter".to_string()),
+            ac_type: AircraftType::TwinOtter,
+            mass: MassModel::twin_otter(),
+            geometry: AircraftGeometry::twin_otter(),
+            aero_coef: AircraftAeroCoefficients::twin_otter(),
+        },
+        AircraftType::F4Phantom => FullAircraftConfig {
+            name: name.unwrap_or_else(|| "unnamed_f4".to_string()),
+            ac_type: AircraftType::F4Phantom,
+            mass: MassModel::f4_phantom(),
+            geometry: AircraftGeometry::f4_phantom(),
+            aero_coef: AircraftAeroCoefficients::f4_phantom(),
+        },
+        _ => FullAircraftConfig {
+            name: name.unwrap_or_else(|| "unnamed_generic".to_string()),
+            ac_type: AircraftType::GenericTransport,
+            mass: MassModel::generic_transport(),
+            geometry: AircraftGeometry::generic_transport(),
+            aero_coef: AircraftAeroCoefficients::generic_transport(),
+        },
+    }
+}
+
+pub fn create_aircraft_builder(
+    dict: &Bound<'_, PyDict>,
+) -> Result<AircraftBuilderEnum, ConfigError> {
+    let aircraft_type: String = dict
+        .get_item("type")
+        .map_err(|_| ConfigError::MissingRequired("aircraft type".into()))?
+        .ok_or_else(|| ConfigError::MissingRequired("aircraft type".into()))?
+        .extract()?;
+
+    match aircraft_type.as_str() {
+        "dubins" => Ok(AircraftBuilderEnum::Dubins(
+            DubinsAircraftConfigBuilder::from_pydict(dict)?,
+        )),
+        "full" => Ok(AircraftBuilderEnum::Full(
+            FullAircraftConfigBuilder::from_pydict(dict)?,
+        )),
+        _ => Err(ConfigError::InvalidAircraftType(aircraft_type)),
     }
 }

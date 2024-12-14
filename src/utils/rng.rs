@@ -4,7 +4,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 /// A simplified RNG manager that provides deterministic seeding
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RngManager {
     master_seed: u64,
 }
