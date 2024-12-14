@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 
 mod gym;
-mod utils;
+pub mod utils;
 
 #[pymodule]
 fn pyflyer(py: Python<'_>, m: &PyModule) -> PyResult<()> {

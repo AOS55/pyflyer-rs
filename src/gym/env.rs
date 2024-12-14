@@ -1,8 +1,5 @@
 use bevy::prelude::*;
-use flyer::{
-    components::PhysicsModel,
-    plugins::{AircraftPlugin, TerrainPlugin},
-};
+use flyer::plugins::{AircraftPlugin, TerrainPlugin};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -26,28 +23,28 @@ impl FlyerEnv {
             EnvConfig::default()
         };
 
-        let physics_model = if let Some(dict) = config_dict {
-            if let Ok(Some(value)) = dict.get_item("physics_model") {
-                if let Ok(model_str) = value.extract::<&str>() {
-                    if model_str == "full" {
-                        PhysicsModel::Full
-                    } else {
-                        PhysicsModel::Simple
-                    }
-                } else {
-                    PhysicsModel::Simple
-                }
-            } else {
-                PhysicsModel::Simple
-            }
-        } else {
-            PhysicsModel::Simple
-        };
+        // let physics_model = if let Some(dict) = config_dict {
+        //     if let Ok(Some(value)) = dict.get_item("physics_model") {
+        //         if let Ok(model_str) = value.extract::<&str>() {
+        //             if model_str == "full" {
+        //                 PhysicsModel::Full
+        //             } else {
+        //                 PhysicsModel::Simple
+        //             }
+        //         } else {
+        //             PhysicsModel::Simple
+        //         }
+        //     } else {
+        //         PhysicsModel::Simple
+        //     }
+        // } else {
+        //     PhysicsModel::Simple
+        // };
 
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            AircraftPlugin::new(physics_model),
+            AircraftPlugin::new(config.physics_model),
             TerrainPlugin,
         ));
 
