@@ -2,5 +2,6 @@ mod config;
 mod env;
 mod state;
 
-use crate::gym::config::EnvConfig;
-use crate::gym::state::EnvState;
+pub use config::EnvConfig;
+pub use env::FlyerEnv;
+pub use state::EnvState;

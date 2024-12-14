@@ -1,10 +1,8 @@
 use bevy::prelude::*;
 use flyer::{
-    components::{AircraftConfig, AircraftState, PhysicsModel},
+    components::PhysicsModel,
     plugins::{AircraftPlugin, TerrainPlugin},
-    resources::PhysicsConfig,
 };
-use numpy::{PyArray1, PyArray2};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 

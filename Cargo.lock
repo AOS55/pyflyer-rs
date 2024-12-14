@@ -3916,6 +3916,8 @@ dependencies = [
  "nalgebra",
  "numpy",
  "pyo3",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
  "tiny-skia",
 ]
 

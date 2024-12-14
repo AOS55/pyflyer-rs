@@ -4,7 +4,7 @@ mod gym;
 mod utils;
 
 #[pymodule]
-fn pyflyer(_py: Python, m: &PyModule) -> PyResult<()> {
+fn pyflyer(py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<gym::FlyerEnv>()?;
     Ok(())
 }
