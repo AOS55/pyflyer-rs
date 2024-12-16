@@ -10,6 +10,10 @@ pub enum ConfigError {
     MissingRequired(String),
     ValidationError(String),
     PythonError(String),
+    InvalidObservationType(String),
+    MissingObservationSpace,
+    InvalidActionType(String),
+    MissingActionSpace,
 }
 
 impl fmt::Display for ConfigError {
@@ -23,6 +27,14 @@ impl fmt::Display for ConfigError {
             ConfigError::MissingRequired(name) => write!(f, "Missing required parameter: {}", name),
             ConfigError::ValidationError(msg) => write!(f, "Validation error: {}", msg),
             ConfigError::PythonError(msg) => write!(f, "Python error: {}", msg),
+            ConfigError::InvalidObservationType(msg) => {
+                write!(f, "Invalid observation type: {}", msg)
+            }
+            ConfigError::MissingObservationSpace => write!(f, "Missing observation space"),
+            ConfigError::InvalidActionType(msg) => {
+                write!(f, "Invalid action type: {}", msg)
+            }
+            ConfigError::MissingActionSpace => write!(f, "Missing action space"),
         }
     }
 }

@@ -5,6 +5,8 @@ use flyer::{
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+use crate::gym::{ActionSpace, ObservationSpace};
+
 mod builders;
 mod errors;
 mod traits;
@@ -17,6 +19,10 @@ pub use traits::*;
 pub struct EnvConfig {
     // Master Seed
     pub seed: u64,
+
+    // Env Configuration
+    pub observation_space: ObservationSpace,
+    pub action_space: ActionSpace,
 
     // Time Configuration
     pub max_episode_steps: u32,

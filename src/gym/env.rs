@@ -1,16 +1,29 @@
 use bevy::prelude::*;
+use flyer::components::{DubinsAircraftState, PlayerController};
 use flyer::plugins::{
     add_aircraft_plugin, DubinsAircraftPlugin, FullAircraftPlugin, TerrainPlugin,
 };
+use numpy::{PyArray1, PyArrayMethods, PyReadonlyArray1};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+use crate::gym::act::ActionConverter;
 use crate::gym::{EnvConfig, EnvState};
 
 #[pyclass(name = "FlyerEnv", unsendable)]
 pub struct FlyerEnv {
+    // Time Tracking
+    elapsed_time: f64,
+    steps_count: u32,
+    episode_count: u32,
+
+    // Bevy reference
     app: App,
-    state: EnvState,
+
+    // Current state tracking
+    current_observation: Option<Vec<f64>>,
+    last_action: Option<Vec<f64>>,
+
     config: EnvConfig,
 }
 
@@ -38,8 +51,12 @@ impl FlyerEnv {
         app.add_plugins(TerrainPlugin::with_config(config.terrain_config.clone()));
 
         Ok(Self {
+            elapsed_time: 0.0,
+            steps_count: 0,
+            episode_count: 0,
             app,
-            state: EnvState::new(),
+            current_observation: None,
+            last_action: None,
             config,
         })
     }
@@ -53,8 +70,90 @@ impl FlyerEnv {
         &mut self,
         py: Python<'_>,
         action: &Bound<'py, PyAny>,
-    ) -> PyResult<(Bound<'py, PyAny>, f64, bool, bool, Bound<'py, PyAny>)> {
-        // Take a step in the simulation/game
-        todo!("Implement step method")
+    ) -> PyResult<(Bound<'py, PyAny>, f64, bool, bool, Bound<'py, PyDict>)> {
+        // Convert python Action to aircraft controls
+        let action_array = action.downcast::<PyArray1<f64>>()?;
+        let action_readonly = action_array.readonly();
+        let controls = self.config.action_space.to_controls(py, action_readonly);
+
+        let world = &mut self.app.world_mut();
+        let mut query = world.query_filtered::<&mut DubinsAircraftState, With<PlayerController>>();
+        if let Ok(mut aircraft_state) = query.get_single_mut(world) {
+            aircraft_state.controls = controls;
+        };
+
+        // Step simulation
+        for _ in 0..self.config.steps_per_action {
+            self.app.update();
+        }
+
+        // Calculate reward
+        let reward = self.calculate_reward();
+
+        // Check termination/truncation
+        let (terminated, truncated) = self.check_termination();
+
+        // Build observation and info
+        let observation = self.get_observation(py)?;
+        let info = self.build_info_dict(py);
+
+        Ok((observation, reward, terminated, truncated, info))
+    }
+
+    fn render<'py>(&mut self, py: Python<'_>, mode: Option<String>) -> PyResult<Bound<'py, PyAny>> {
+        // Render the simulation/game
+        todo!("Implement render method")
+    }
+
+    fn get_action_space<'py>(&self, py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
+        // Get the action space
+        todo!("Implement get_action_space method")
+    }
+
+    fn get_observation_space<'py>(&self, py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
+        // Get the observation space
+        todo!("Implement get_observation_space method")
+    }
+
+    fn get_spec<'py>(&self, py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
+        // Get the environment spec
+        todo!("Implement get_spec attribute")
+    }
+
+    fn get_render_mode(&self) -> PyResult<String> {
+        // Get the render mode
+        todo!("Implement get_render_mode attribute")
+    }
+
+    fn get_seed(&self) -> PyResult<u64> {
+        // Get the seed
+        Ok(self.config.seed)
+    }
+
+    fn get_observation<'py>(&self) -> PyResult<Bound<'_, PyAny>> {
+        // Get the current observation
+        todo!("Implement get_observation method")
+    }
+
+    fn build_info_dict<'py>(&self, py: Python<'_>) -> Bound<'_, PyDict> {
+        // Build info dictionary
+        todo!("Implement info dictionary")
+    }
+
+    fn calculate_reward(&mut self) -> f64 {
+        // Calculate reward based on current state
+        todo!("Implement reward calculation");
+        0.0
+    }
+
+    fn check_termination(&mut self) -> (bool, bool) {
+        // Check episode termination
+        todo!("Implement termination check");
+        let terminated = False;
+
+        // Check truncation
+        let truncated = self.steps_count >= self.config.max_steps;
+
+        return (terminated, truncated);
     }
 }
