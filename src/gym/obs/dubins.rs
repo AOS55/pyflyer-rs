@@ -1,9 +1,9 @@
 use flyer::components::DubinsAircraftState;
 
 pub struct ContinuousDubinsObs {
-    heading: f64,
-    altitude: f64,
-    airspeed: f64,
+    pub heading: f64,
+    pub altitude: f64,
+    pub airspeed: f64,
 }
 
 impl ContinuousDubinsObs {

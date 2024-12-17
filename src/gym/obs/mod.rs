@@ -1,4 +1,4 @@
-mod dubins;
+pub mod dubins;
 
 #[derive(Copy, Debug, Clone)]
 pub enum ObservationSpace {

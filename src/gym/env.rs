@@ -3,12 +3,14 @@ use flyer::components::{DubinsAircraftState, PlayerController};
 use flyer::plugins::{
     add_aircraft_plugin, DubinsAircraftPlugin, FullAircraftPlugin, TerrainPlugin,
 };
-use numpy::{PyArray1, PyArrayMethods, PyReadonlyArray1};
+use numpy::{IntoPyArray, PyArray1, PyArrayMethods, PyReadonlyArray1};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::gym::act::ActionConverter;
-use crate::gym::{EnvConfig, EnvState};
+use crate::gym::config::ConfigError;
+use crate::gym::obs::dubins::ContinuousDubinsObs;
+use crate::gym::{EnvConfig, ObservationSpace};
 
 #[pyclass(name = "FlyerEnv", unsendable)]
 pub struct FlyerEnv {
@@ -68,7 +70,7 @@ impl FlyerEnv {
 
     fn step<'py>(
         &mut self,
-        py: Python<'_>,
+        py: Python<'py>,
         action: &Bound<'py, PyAny>,
     ) -> PyResult<(Bound<'py, PyAny>, f64, bool, bool, Bound<'py, PyDict>)> {
         // Convert python Action to aircraft controls
@@ -130,12 +132,37 @@ impl FlyerEnv {
         Ok(self.config.seed)
     }
 
-    fn get_observation<'py>(&self) -> PyResult<Bound<'_, PyAny>> {
+    fn get_observation<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         // Get the current observation
-        todo!("Implement get_observation method")
+        let world = &mut self.app.world_mut();
+        let mut query = world.query_filtered::<&DubinsAircraftState, With<PlayerController>>();
+
+        if let Ok(aircraft_state) = query.get_single(world) {
+            // Convert to observation based on the observation space type
+            match self.config.observation_space {
+                ObservationSpace::ContinuousDubinsObs => {
+                    // Create observation from aircraft state
+                    let obs = ContinuousDubinsObs::from_aircraft(*aircraft_state);
+
+                    // Convert to numpy array
+                    let observation = vec![
+                        obs.heading,  // Heading angle in radians
+                        obs.altitude, // Altitude in meters
+                        obs.airspeed, // Airspeed in m/s
+                    ];
+
+                    // Create and return numpy array
+                    let np_array = PyArray1::from_vec(py, observation);
+                    Ok(np_array.into_any())
+                }
+            }
+        } else {
+            // Return error if we couldn't get the aircraft state
+            Err(ConfigError::ValidationError("Could not get aircraft state".into()).into())
+        }
     }
 
-    fn build_info_dict<'py>(&self, py: Python<'_>) -> Bound<'_, PyDict> {
+    fn build_info_dict<'py>(&self, py: Python<'py>) -> Bound<'py, PyDict> {
         // Build info dictionary
         todo!("Implement info dictionary")
     }
@@ -149,10 +176,10 @@ impl FlyerEnv {
     fn check_termination(&mut self) -> (bool, bool) {
         // Check episode termination
         todo!("Implement termination check");
-        let terminated = False;
+        let terminated = false;
 
         // Check truncation
-        let truncated = self.steps_count >= self.config.max_steps;
+        let truncated = self.steps_count >= self.config.max_episode_steps;
 
         return (terminated, truncated);
     }
