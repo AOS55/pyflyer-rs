@@ -3,10 +3,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use rand;
 
-mod act;
 mod aircraft;
-mod environment;
-mod obs;
+// mod environment;
 mod physics;
 mod reward;
 mod start;
@@ -16,10 +14,8 @@ mod terrain;
 use crate::gym::config::errors::ConfigError;
 use crate::gym::config::EnvConfig;
 use crate::utils::{RngManager, WithRng};
-use act::ActionSpaceBuilder;
 use aircraft::{create_aircraft_builder, AircraftBuilder, AircraftBuilderEnum};
-use environment::EnvironmentConfigBuilder;
-use obs::ObservationSpaceBuilder;
+// use environment::EnvironmentConfigBuilder;
 use physics::PhysicsConfigBuilder;
 use reward::RewardWeightsBuilder;
 use start::RandomStartPosConfigBuilder;
@@ -31,11 +27,9 @@ pub struct EnvConfigBuilder {
     max_episode_steps: Option<u32>,
     steps_per_action: Option<u32>,
     time_step: Option<f64>,
-    observation_space: ObservationSpaceBuilder,
-    action_space: ActionSpaceBuilder,
     aircraft_builders: Vec<AircraftBuilderEnum>,
     physics_builder: PhysicsConfigBuilder,
-    environment_builder: EnvironmentConfigBuilder,
+    // environment_builder: EnvironmentConfigBuilder,
     terrain_builder: TerrainConfigBuilder,
     reward_builder: RewardWeightsBuilder,
     terminal_builder: TerminalConditionsBuilder,
@@ -48,11 +42,9 @@ impl Default for EnvConfigBuilder {
             max_episode_steps: None,
             steps_per_action: None,
             time_step: None,
-            observation_space: ObservationSpaceBuilder::default(),
-            action_space: ActionSpaceBuilder::default(),
             aircraft_builders: Vec::new(),
             physics_builder: PhysicsConfigBuilder::default(),
-            environment_builder: EnvironmentConfigBuilder::default(),
+            // environment_builder: EnvironmentConfigBuilder::default(),
             terrain_builder: TerrainConfigBuilder::default(),
             reward_builder: RewardWeightsBuilder::default(),
             terminal_builder: TerminalConditionsBuilder::default(),
@@ -63,11 +55,6 @@ impl Default for EnvConfigBuilder {
 impl EnvConfigBuilder {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn seed(mut self, seed: u64) -> Self {
-        self.rng_manager = Some(RngManager::new(seed));
-        self
     }
 
     pub fn max_episode_steps(mut self, steps: u32) -> Self {
@@ -85,28 +72,13 @@ impl EnvConfigBuilder {
         self
     }
 
-    pub fn aircraft_config(mut self, builder: AircraftBuilderEnum) -> Self {
-        self.aircraft_builders.push(builder);
-        self
-    }
-
-    pub fn physics_config(mut self, builder: PhysicsConfigBuilder) -> Self {
-        self.physics_builder = builder;
-        self
-    }
+    // pub fn physics_config(mut self, builder: PhysicsConfigBuilder) -> Self {
+    //     self.physics_builder = builder;
+    //     self
+    // }
 
     pub fn terrain_config(mut self, builder: TerrainConfigBuilder) -> Self {
         self.terrain_builder = builder;
-        self
-    }
-
-    pub fn observation_space(mut self, builder: ObservationSpaceBuilder) -> Self {
-        self.observation_space = builder;
-        self
-    }
-
-    pub fn action_space(mut self, builder: ActionSpaceBuilder) -> Self {
-        self.action_space = builder;
         self
     }
 
@@ -155,21 +127,6 @@ impl EnvConfigBuilder {
             }
         }
 
-        // Build the Observation and Action Spaces
-        if let Some(observation_dict) = dict.get_item("observation_config")? {
-            if let Ok(dict) = observation_dict.downcast::<PyDict>() {
-                let obs_space = ObservationSpaceBuilder::from_pydict(&dict)?;
-                builder = builder.observation_space(obs_space);
-            }
-        }
-
-        if let Some(action_dict) = dict.get_item("action_config")? {
-            if let Ok(dict) = action_dict.downcast::<PyDict>() {
-                let act_space = ActionSpaceBuilder::from_pydict(&dict)?;
-                builder = builder.action_space(act_space);
-            }
-        }
-
         Ok(builder)
     }
 
@@ -189,11 +146,9 @@ impl EnvConfigBuilder {
             max_episode_steps: self.max_episode_steps.unwrap_or(1000),
             steps_per_action: self.steps_per_action.unwrap_or(4),
             time_step: self.time_step.unwrap_or(1.0 / 60.0),
-            observation_space: self.observation_space.build()?,
-            action_space: self.action_space.build()?,
             aircraft_configs,
             physics_config: self.physics_builder.build()?,
-            environment_config: self.environment_builder.build()?,
+            // environment_config: self.environment_builder.build()?,
             terrain_config: self.terrain_builder.build()?,
             reward_weights: Some(self.reward_builder.build()?),
             terminal_conditions: self.terminal_builder.build()?,

@@ -1,12 +1,19 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use crate::gym::config::errors::ConfigError;
+use crate::gym::config::ConfigError;
 use crate::gym::ObservationSpace;
 
-#[derive(Default)]
 pub struct ObservationSpaceBuilder {
     obs_space: Option<ObservationSpace>,
+}
+
+impl Default for ObservationSpaceBuilder {
+    fn default() -> Self {
+        Self {
+            obs_space: Some(ObservationSpace::ContinuousDubinsObs),
+        }
+    }
 }
 
 impl ObservationSpaceBuilder {

@@ -20,10 +20,6 @@ pub struct EnvConfig {
     // Master Seed
     pub seed: u64,
 
-    // Env Configuration
-    pub observation_space: ObservationSpace,
-    pub action_space: ActionSpace,
-
     // Time Configuration
     pub max_episode_steps: u32,
     pub steps_per_action: u32,
@@ -32,7 +28,7 @@ pub struct EnvConfig {
     // Aircraft Configuration
     pub aircraft_configs: Vec<AircraftConfig>,
     pub physics_config: PhysicsConfig,
-    pub environment_config: EnvironmentConfig,
+    // pub environment_config: EnvironmentConfig,
 
     // Terrain Configuration
     pub terrain_config: TerrainConfig,

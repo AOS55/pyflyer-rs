@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use flyer::components::{DubinsAircraftState, PlayerController};
+use flyer::components::{AircraftConfig, DubinsAircraftState, PlayerController};
 use flyer::plugins::{
     add_aircraft_plugin, DubinsAircraftPlugin, FullAircraftPlugin, TerrainPlugin,
 };
@@ -7,10 +7,11 @@ use numpy::{IntoPyArray, PyArray1, PyArrayMethods, PyReadonlyArray1};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use crate::gym::act::ActionConverter;
+use crate::gym::act::{ActionSpaceBuilder, AircraftControls, ToControls};
 use crate::gym::config::ConfigError;
 use crate::gym::obs::dubins::ContinuousDubinsObs;
-use crate::gym::{EnvConfig, ObservationSpace};
+use crate::gym::obs::ObservationSpaceBuilder;
+use crate::gym::{ActionSpace, EnvConfig, ObservationSpace};
 
 #[pyclass(name = "FlyerEnv", unsendable)]
 pub struct FlyerEnv {
@@ -26,6 +27,9 @@ pub struct FlyerEnv {
     current_observation: Option<Vec<f64>>,
     last_action: Option<Vec<f64>>,
 
+    // Spaces
+    observation_space: ObservationSpace,
+    action_space: ActionSpace,
     config: EnvConfig,
 }
 
@@ -52,6 +56,37 @@ impl FlyerEnv {
 
         app.add_plugins(TerrainPlugin::with_config(config.terrain_config.clone()));
 
+        // Create spaces
+        let action_space = if let Some(dict) = config_dict {
+            if let Some(action_dict) = dict.get_item("action_config")? {
+                if let Ok(dict) = action_dict.downcast::<PyDict>() {
+                    let builder = ActionSpaceBuilder::from_pydict(&dict)?;
+                    builder.build()?
+                } else {
+                    ActionSpace::new_dubins() // ToDo: Think of a better catch, need to resolve to default match
+                }
+            } else {
+                ActionSpace::new_dubins() // ToDo: Think of a better catch, need to resolve to default match
+            }
+        } else {
+            ActionSpace::new_dubins() // ToDo: Think of a better catch, need to resolve to default match
+        };
+
+        let observation_space = if let Some(dict) = config_dict {
+            if let Some(observation_dict) = dict.get_item("observation_config")? {
+                if let Ok(dict) = observation_dict.downcast::<PyDict>() {
+                    let builder = ObservationSpaceBuilder::from_pydict(&dict)?;
+                    builder.build()?
+                } else {
+                    ObservationSpace::ContinuousDubinsObs // ToDo: Think of a better catch, need to resolve to default match
+                }
+            } else {
+                ObservationSpace::ContinuousDubinsObs // ToDo: Think of a better catch, need to resolve to default match
+            }
+        } else {
+            ObservationSpace::ContinuousDubinsObs // ToDo: Think of a better catch, need to resolve to default match
+        };
+
         Ok(Self {
             elapsed_time: 0.0,
             steps_count: 0,
@@ -59,6 +94,8 @@ impl FlyerEnv {
             app,
             current_observation: None,
             last_action: None,
+            observation_space: observation_space,
+            action_space,
             config,
         })
     }
@@ -76,7 +113,15 @@ impl FlyerEnv {
         // Convert python Action to aircraft controls
         let action_array = action.downcast::<PyArray1<f64>>()?;
         let action_readonly = action_array.readonly();
-        let controls = self.config.action_space.to_controls(py, action_readonly);
+
+        let controls = match self.action_space.to_controls(py, action_readonly) {
+            AircraftControls::Dubins(controls) => controls,
+            AircraftControls::Full(_) => {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                    "Full aircraft controls not supported yet",
+                ))
+            }
+        };
 
         let world = &mut self.app.world_mut();
         let mut query = world.query_filtered::<&mut DubinsAircraftState, With<PlayerController>>();
@@ -86,6 +131,7 @@ impl FlyerEnv {
 
         // Step simulation
         for _ in 0..self.config.steps_per_action {
+            self.elapsed_time += self.config.time_step;
             self.app.update();
         }
 
@@ -107,31 +153,37 @@ impl FlyerEnv {
         todo!("Implement render method")
     }
 
+    #[getter]
     fn get_action_space<'py>(&self, py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
         // Get the action space
         todo!("Implement get_action_space method")
     }
 
+    #[getter]
     fn get_observation_space<'py>(&self, py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
         // Get the observation space
         todo!("Implement get_observation_space method")
     }
 
+    #[getter]
     fn get_spec<'py>(&self, py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
         // Get the environment spec
         todo!("Implement get_spec attribute")
     }
 
+    #[getter]
     fn get_render_mode(&self) -> PyResult<String> {
         // Get the render mode
         todo!("Implement get_render_mode attribute")
     }
 
+    #[getter]
     fn get_seed(&self) -> PyResult<u64> {
         // Get the seed
         Ok(self.config.seed)
     }
 
+    #[getter]
     fn get_observation<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         // Get the current observation
         let world = &mut self.app.world_mut();
@@ -139,7 +191,7 @@ impl FlyerEnv {
 
         if let Ok(aircraft_state) = query.get_single(world) {
             // Convert to observation based on the observation space type
-            match self.config.observation_space {
+            match self.observation_space {
                 ObservationSpace::ContinuousDubinsObs => {
                     // Create observation from aircraft state
                     let obs = ContinuousDubinsObs::from_aircraft(*aircraft_state);
