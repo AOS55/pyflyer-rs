@@ -391,6 +391,7 @@ impl BiomeThresholdsBuilder {
             }
         }
 
+        // TODO: Change to use the defaults from the aircraft if possible
         // Create BiomeThresholds with defaults for unspecified values
         Ok(BiomeThresholds {
             water: self.water.unwrap_or(0.48),

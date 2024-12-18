@@ -1,19 +1,18 @@
 use flyer::{
     components::{AircraftConfig, TerminalConditions},
-    resources::{EnvironmentConfig, PhysicsConfig, RewardWeights, TerrainConfig},
+    resources::{AgentConfig, EnvironmentConfig, PhysicsConfig, RewardWeights, TerrainConfig},
 };
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use std::collections::HashMap;
 
 use crate::gym::{ActionSpace, ObservationSpace};
 
 mod builders;
 mod errors;
-mod traits;
 
 pub use builders::*;
 pub use errors::*;
-pub use traits::*;
 
 #[derive(Debug, Clone)]
 pub struct EnvConfig {
@@ -26,12 +25,19 @@ pub struct EnvConfig {
     pub time_step: f64,
 
     // Aircraft Configuration
-    pub aircraft_configs: Vec<AircraftConfig>,
+    pub aircraft_configs: HashMap<String, AircraftConfig>,
+    pub action_spaces: HashMap<String, ActionSpace>,
+    pub observation_spaces: HashMap<String, ObservationSpace>,
+
+    // Environment/physics Configuration
     pub physics_config: PhysicsConfig,
     // pub environment_config: EnvironmentConfig,
 
     // Terrain Configuration
     pub terrain_config: TerrainConfig,
+
+    // Agent Configuration
+    pub agent_config: AgentConfig,
 
     // Terminal conditions
     pub terminal_conditions: TerminalConditions,
@@ -41,10 +47,6 @@ pub struct EnvConfig {
 }
 
 impl EnvConfig {
-    pub fn builder() -> EnvConfigBuilder {
-        EnvConfigBuilder::new()
-    }
-
     pub fn from_pydict(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
         let builder = EnvConfigBuilder::from_pydict(dict)?;
         builder.build().map_err(Into::into)

@@ -1,8 +1,4 @@
-mod builder;
-
-pub use builder::ActionSpaceBuilder;
-
-use flyer::components::{AircraftControlSurfaces, DubinsAircraftControls};
+use flyer::components::{AircraftControlSurfaces, AircraftControls, DubinsAircraftControls};
 use numpy::PyReadonlyArray1;
 use pyo3::prelude::*;
 
@@ -45,14 +41,8 @@ pub enum DiscreteActionSpace {
     },
 }
 
-#[derive(Debug, Clone)]
-pub enum AircraftControls {
-    Dubins(DubinsAircraftControls),
-    Full(AircraftControlSurfaces),
-}
-
 impl ActionSpace {
-    pub fn new_dubins() -> Self {
+    pub fn new_continuous_dubins() -> Self {
         ActionSpace::Continuous(ContinuousActionSpace::DubinsAircraft {
             max_acceleration: 10.0,
             max_bank_angle: 45.0_f64.to_radians(),
@@ -65,6 +55,22 @@ impl ActionSpace {
             acceleration_levels: vec![-1.0, 0.0, 1.0],
             bank_angle_levels: vec![-0.5, 0.0, 0.5],
             vertical_speed_levels: vec![-1.0, 0.0, 1.0],
+        })
+    }
+
+    pub fn new_continuous_full() -> Self {
+        ActionSpace::Continuous(ContinuousActionSpace::FullAircraft {
+            max_elevator: 10.0,
+            max_aileron: 10.0,
+            max_rudder: 10.0,
+        })
+    }
+
+    pub fn new_discrete_full() -> Self {
+        ActionSpace::Discrete(DiscreteActionSpace::FullAircraft {
+            elevator_levels: vec![-1.0, 0.0, 1.0],
+            aileron_levels: vec![-1.0, 0.0, 1.0],
+            rudder_levels: vec![-1.0, 0.0, 1.0],
         })
     }
 }

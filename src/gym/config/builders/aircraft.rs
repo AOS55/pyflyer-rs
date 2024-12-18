@@ -7,9 +7,18 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use rand_chacha::ChaCha8Rng;
 
-use crate::gym::config::builders::RandomStartPosConfigBuilder;
+use crate::gym::config::builders::{
+    ActionSpaceBuilder, ObservationSpaceBuilder, RandomStartPosConfigBuilder,
+};
 use crate::gym::config::errors::ConfigError;
+use crate::gym::{ActionSpace, ObservationSpace};
 use crate::utils::WithRng;
+
+pub struct AircraftAgentBuilder {
+    pub aircraft_builder: AircraftBuilderEnum,
+    pub observation_builder: ObservationSpaceBuilder,
+    pub action_builder: ActionSpaceBuilder,
+}
 
 // Simplified to just one trait for building aircraft
 pub trait AircraftBuilder {
@@ -26,17 +35,6 @@ impl AircraftBuilder for AircraftBuilderEnum {
         match self {
             AircraftBuilderEnum::Dubins(builder) => builder.build(),
             AircraftBuilderEnum::Full(builder) => builder.build(),
-        }
-    }
-}
-
-impl WithRng for AircraftBuilderEnum {
-    fn with_rng(self, rng: ChaCha8Rng) -> Self {
-        match self {
-            AircraftBuilderEnum::Dubins(builder) => {
-                AircraftBuilderEnum::Dubins(builder.with_rng(rng))
-            }
-            AircraftBuilderEnum::Full(builder) => AircraftBuilderEnum::Full(builder.with_rng(rng)),
         }
     }
 }
@@ -249,6 +247,17 @@ impl WithRng for FullAircraftConfigBuilder {
     }
 }
 
+impl WithRng for AircraftBuilderEnum {
+    fn with_rng(self, rng: ChaCha8Rng) -> Self {
+        match self {
+            AircraftBuilderEnum::Dubins(builder) => {
+                AircraftBuilderEnum::Dubins(builder.with_rng(rng))
+            }
+            AircraftBuilderEnum::Full(builder) => AircraftBuilderEnum::Full(builder.with_rng(rng)),
+        }
+    }
+}
+
 // Helper functions to parse configuration
 fn parse_mass_dict(mass_dict: &Bound<'_, PyDict>) -> PyResult<Option<MassModel>> {
     let mass = mass_dict.get_item("mass")?.and_then(|v| v.extract().ok());
@@ -282,48 +291,90 @@ fn parse_geometry_dict(geom_dict: &Bound<'_, PyDict>) -> PyResult<Option<Aircraf
     }
 }
 
-fn get_default_full_config(ac_type: &AircraftType, name: Option<String>) -> FullAircraftConfig {
-    match ac_type {
-        AircraftType::TwinOtter => FullAircraftConfig {
-            name: name.unwrap_or_else(|| "unnamed_twin_otter".to_string()),
-            ac_type: AircraftType::TwinOtter,
-            mass: MassModel::twin_otter(),
-            geometry: AircraftGeometry::twin_otter(),
-            aero_coef: AircraftAeroCoefficients::twin_otter(),
-        },
-        AircraftType::F4Phantom => FullAircraftConfig {
-            name: name.unwrap_or_else(|| "unnamed_f4".to_string()),
-            ac_type: AircraftType::F4Phantom,
-            mass: MassModel::f4_phantom(),
-            geometry: AircraftGeometry::f4_phantom(),
-            aero_coef: AircraftAeroCoefficients::f4_phantom(),
-        },
-        _ => FullAircraftConfig {
-            name: name.unwrap_or_else(|| "unnamed_generic".to_string()),
-            ac_type: AircraftType::GenericTransport,
-            mass: MassModel::generic_transport(),
-            geometry: AircraftGeometry::generic_transport(),
-            aero_coef: AircraftAeroCoefficients::generic_transport(),
-        },
-    }
-}
+// fn get_default_full_config(ac_type: &AircraftType, name: Option<String>) -> FullAircraftConfig {
+//     match ac_type {
+//         AircraftType::TwinOtter => FullAircraftConfig {
+//             name: name.unwrap_or_else(|| "unnamed_twin_otter".to_string()),
+//             ac_type: AircraftType::TwinOtter,
+//             mass: MassModel::twin_otter(),
+//             geometry: AircraftGeometry::twin_otter(),
+//             aero_coef: AircraftAeroCoefficients::twin_otter(),
+//         },
+//         AircraftType::F4Phantom => FullAircraftConfig {
+//             name: name.unwrap_or_else(|| "unnamed_f4".to_string()),
+//             ac_type: AircraftType::F4Phantom,
+//             mass: MassModel::f4_phantom(),
+//             geometry: AircraftGeometry::f4_phantom(),
+//             aero_coef: AircraftAeroCoefficients::f4_phantom(),
+//         },
+//         _ => FullAircraftConfig {
+//             name: name.unwrap_or_else(|| "unnamed_generic".to_string()),
+//             ac_type: AircraftType::GenericTransport,
+//             mass: MassModel::generic_transport(),
+//             geometry: AircraftGeometry::generic_transport(),
+//             aero_coef: AircraftAeroCoefficients::generic_transport(),
+//         },
+//     }
+// }
 
 pub fn create_aircraft_builder(
     dict: &Bound<'_, PyDict>,
-) -> Result<AircraftBuilderEnum, ConfigError> {
+) -> Result<AircraftAgentBuilder, ConfigError> {
     let aircraft_type: String = dict
         .get_item("type")
         .map_err(|_| ConfigError::MissingRequired("aircraft type".into()))?
         .ok_or_else(|| ConfigError::MissingRequired("aircraft type".into()))?
         .extract()?;
 
-    match aircraft_type.as_str() {
-        "dubins" => Ok(AircraftBuilderEnum::Dubins(
-            DubinsAircraftConfigBuilder::from_pydict(dict)?,
-        )),
-        "full" => Ok(AircraftBuilderEnum::Full(
-            FullAircraftConfigBuilder::from_pydict(dict)?,
-        )),
-        _ => Err(ConfigError::InvalidAircraftType(aircraft_type)),
-    }
+    let observation_type: String = dict
+        .get_item("action_type")
+        .map_err(|_| ConfigError::MissingRequired("action type".into()))?
+        .ok_or_else(|| ConfigError::MissingRequired("action type".into()))?
+        .extract()?;
+
+    let action_type: String = dict
+        .get_item("observation_type")
+        .map_err(|_| ConfigError::MissingRequired("observation type".into()))?
+        .ok_or_else(|| ConfigError::MissingRequired("observation type".into()))?
+        .extract()?;
+
+    let aircraft_builder = match aircraft_type.as_str() {
+        "dubins" => {
+            let builder = DubinsAircraftConfigBuilder::from_pydict(dict)?;
+            AircraftBuilderEnum::Dubins(builder)
+        }
+        "full" => {
+            let builder = FullAircraftConfigBuilder::from_pydict(dict)?;
+            AircraftBuilderEnum::Full(builder)
+        }
+        _ => return Err(ConfigError::InvalidAircraftType(aircraft_type)),
+    };
+
+    let action_builder = match action_type.as_str() {
+        "Continuous" => match aircraft_type.as_str() {
+            "dubins" => ActionSpaceBuilder::new().act_space(ActionSpace::new_continuous_dubins()),
+            "full" => ActionSpaceBuilder::new().act_space(ActionSpace::new_continuous_full()),
+            _ => return Err(ConfigError::InvalidActionType(action_type)),
+        },
+        "Discrete" => match aircraft_type.as_str() {
+            "dubins" => ActionSpaceBuilder::new().act_space(ActionSpace::new_discrete_dubins()),
+            "full" => ActionSpaceBuilder::new().act_space(ActionSpace::new_discrete_full()),
+            _ => return Err(ConfigError::InvalidActionType(action_type)),
+        },
+        _ => return Err(ConfigError::InvalidActionType(action_type)),
+    };
+
+    let observation_builder = match observation_type.as_str() {
+        "ContinuousDubinsObs" => {
+            ObservationSpaceBuilder::new().obs_space(ObservationSpace::ContinuousDubinsObs)
+        }
+        // Add more observation types as needed
+        _ => return Err(ConfigError::InvalidObservationType(observation_type)),
+    };
+
+    Ok(AircraftAgentBuilder {
+        aircraft_builder,
+        observation_builder,
+        action_builder,
+    })
 }

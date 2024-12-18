@@ -1,10 +1,14 @@
 use flyer::components::AircraftConfig;
+use flyer::resources::AgentConfig;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use rand;
+use std::collections::HashMap;
 
 mod aircraft;
 // mod environment;
+mod act;
+mod obs;
 mod physics;
 mod reward;
 mod start;
@@ -12,10 +16,12 @@ mod termination;
 mod terrain;
 
 use crate::gym::config::errors::ConfigError;
-use crate::gym::config::EnvConfig;
+use crate::gym::{ActionSpace, EnvConfig, ObservationSpace};
 use crate::utils::{RngManager, WithRng};
 use aircraft::{create_aircraft_builder, AircraftBuilder, AircraftBuilderEnum};
 // use environment::EnvironmentConfigBuilder;
+pub use act::ActionSpaceBuilder;
+pub use obs::ObservationSpaceBuilder;
 use physics::PhysicsConfigBuilder;
 use reward::RewardWeightsBuilder;
 use start::RandomStartPosConfigBuilder;
@@ -27,7 +33,9 @@ pub struct EnvConfigBuilder {
     max_episode_steps: Option<u32>,
     steps_per_action: Option<u32>,
     time_step: Option<f64>,
-    aircraft_builders: Vec<AircraftBuilderEnum>,
+    aircraft_builders: HashMap<String, AircraftBuilderEnum>,
+    action_builders: HashMap<String, ActionSpaceBuilder>,
+    observation_builders: HashMap<String, ObservationSpaceBuilder>,
     physics_builder: PhysicsConfigBuilder,
     // environment_builder: EnvironmentConfigBuilder,
     terrain_builder: TerrainConfigBuilder,
@@ -42,7 +50,9 @@ impl Default for EnvConfigBuilder {
             max_episode_steps: None,
             steps_per_action: None,
             time_step: None,
-            aircraft_builders: Vec::new(),
+            aircraft_builders: HashMap::new(),
+            action_builders: HashMap::new(),
+            observation_builders: HashMap::new(),
             physics_builder: PhysicsConfigBuilder::default(),
             // environment_builder: EnvironmentConfigBuilder::default(),
             terrain_builder: TerrainConfigBuilder::default(),
@@ -105,14 +115,28 @@ impl EnvConfigBuilder {
             builder = builder.time_step(dt.extract()?);
         }
 
-        // Get the aircrft from the list of aircraft types
+        // Get the aircraft from the list of aircraft types
         if let Some(aircraft_list) = dict.get_item("aircraft_config")? {
             if let Ok(aircraft_configs) = aircraft_list.downcast::<PyList>() {
                 for (i, aircraft_dict) in aircraft_configs.iter().enumerate() {
                     if let Ok(config_dict) = aircraft_dict.downcast::<PyDict>() {
-                        let aircraft_builder = create_aircraft_builder(&config_dict)?
-                            .with_rng(rng_manager.get_rng(&format!("aircraft_{}", i)));
-                        builder.aircraft_builders.push(aircraft_builder);
+                        let aircraft_agent = create_aircraft_builder(&config_dict)?;
+                        let id = format!("aircraft_{}", i);
+
+                        builder.aircraft_builders.insert(
+                            id.clone(),
+                            aircraft_agent
+                                .aircraft_builder
+                                .with_rng(rng_manager.get_rng(&id)),
+                        );
+
+                        builder
+                            .action_builders
+                            .insert(id.clone(), aircraft_agent.action_builder);
+
+                        builder
+                            .observation_builders
+                            .insert(id.clone(), aircraft_agent.observation_builder);
                     }
                 }
             }
@@ -135,11 +159,23 @@ impl EnvConfigBuilder {
             .rng_manager
             .unwrap_or_else(|| RngManager::new(rand::random()));
 
-        let aircraft_configs = self
-            .aircraft_builders
-            .into_iter()
-            .map(|builder| builder.build())
-            .collect::<Result<Vec<AircraftConfig>, ConfigError>>()?;
+        // Build configurations from HashMaps
+        let mut aircraft_configs: HashMap<String, AircraftConfig> = HashMap::new();
+        let mut action_spaces: HashMap<String, ActionSpace> = HashMap::new();
+        let mut observation_spaces: HashMap<String, ObservationSpace> = HashMap::new();
+
+        // Process all builders
+        for (id, builder) in self.aircraft_builders {
+            aircraft_configs.insert(id.clone(), builder.build()?);
+        }
+
+        for (id, builder) in self.action_builders {
+            action_spaces.insert(id.clone(), builder.build()?);
+        }
+
+        for (id, builder) in self.observation_builders {
+            observation_spaces.insert(id.clone(), builder.build()?);
+        }
 
         Ok(EnvConfig {
             seed: rng_manager.master_seed(),
@@ -147,9 +183,12 @@ impl EnvConfigBuilder {
             steps_per_action: self.steps_per_action.unwrap_or(4),
             time_step: self.time_step.unwrap_or(1.0 / 60.0),
             aircraft_configs,
+            action_spaces,
+            observation_spaces,
             physics_config: self.physics_builder.build()?,
             // environment_config: self.environment_builder.build()?,
             terrain_config: self.terrain_builder.build()?,
+            agent_config: AgentConfig::default(),
             reward_weights: Some(self.reward_builder.build()?),
             terminal_conditions: self.terminal_builder.build()?,
         })

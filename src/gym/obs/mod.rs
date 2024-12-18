@@ -1,7 +1,4 @@
-mod builder;
 pub mod dubins;
-
-pub use builder::ObservationSpaceBuilder;
 
 #[derive(Copy, Debug, Clone)]
 pub enum ObservationSpace {
