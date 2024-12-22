@@ -11,6 +11,7 @@ use crate::gym::config::builders::{
     ActionSpaceBuilder, ObservationSpaceBuilder, RandomStartPosConfigBuilder,
 };
 use crate::gym::config::errors::ConfigError;
+use crate::gym::obs::ContinuousObservationSpace;
 use crate::gym::{ActionSpace, ObservationSpace};
 use crate::utils::WithRng;
 
@@ -326,13 +327,13 @@ pub fn create_aircraft_builder(
         .ok_or_else(|| ConfigError::MissingRequired("aircraft type".into()))?
         .extract()?;
 
-    let observation_type: String = dict
+    let action_type: String = dict
         .get_item("action_type")
         .map_err(|_| ConfigError::MissingRequired("action type".into()))?
         .ok_or_else(|| ConfigError::MissingRequired("action type".into()))?
         .extract()?;
 
-    let action_type: String = dict
+    let observation_type: String = dict
         .get_item("observation_type")
         .map_err(|_| ConfigError::MissingRequired("observation type".into()))?
         .ok_or_else(|| ConfigError::MissingRequired("observation type".into()))?
@@ -359,15 +360,21 @@ pub fn create_aircraft_builder(
         "Discrete" => match aircraft_type.as_str() {
             "dubins" => ActionSpaceBuilder::new().act_space(ActionSpace::new_discrete_dubins()),
             "full" => ActionSpaceBuilder::new().act_space(ActionSpace::new_discrete_full()),
-            _ => return Err(ConfigError::InvalidActionType(action_type)),
+            _ => return Err(ConfigError::InvalidAircraftType(action_type)),
         },
         _ => return Err(ConfigError::InvalidActionType(action_type)),
     };
 
     let observation_builder = match observation_type.as_str() {
-        "ContinuousDubinsObs" => {
-            ObservationSpaceBuilder::new().obs_space(ObservationSpace::ContinuousDubinsObs)
-        }
+        "Continuous" => match aircraft_type.as_str() {
+            "dubins" => ObservationSpaceBuilder::new().obs_space(ObservationSpace::Continuous(
+                ContinuousObservationSpace::DubinsAircraft,
+            )),
+            "full" => ObservationSpaceBuilder::new().obs_space(ObservationSpace::Continuous(
+                ContinuousObservationSpace::FullAircraft,
+            )),
+            _ => return Err(ConfigError::InvalidAircraftType(aircraft_type)),
+        },
         // Add more observation types as needed
         _ => return Err(ConfigError::InvalidObservationType(observation_type)),
     };

@@ -1,4 +1,5 @@
 use crate::gym::config::ConfigError;
+use crate::gym::obs::ContinuousObservationSpace;
 use crate::gym::ObservationSpace;
 
 pub struct ObservationSpaceBuilder {
@@ -8,7 +9,9 @@ pub struct ObservationSpaceBuilder {
 impl Default for ObservationSpaceBuilder {
     fn default() -> Self {
         Self {
-            obs_space: Some(ObservationSpace::ContinuousDubinsObs),
+            obs_space: Some(ObservationSpace::Continuous(
+                ContinuousObservationSpace::DubinsAircraft,
+            )),
         }
     }
 }

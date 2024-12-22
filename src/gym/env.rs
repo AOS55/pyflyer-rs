@@ -1,15 +1,18 @@
 use bevy::prelude::*;
-use flyer::components::{DubinsAircraftState, PlayerController};
-use flyer::plugins::{
-    add_aircraft_plugin, AgentPlugin, CameraPlugin, TerrainPlugin, TransformationPlugin,
+use flyer::{
+    plugins::Id,
+    resources::{AgentState, RenderMode},
 };
-use flyer::resources::AgentState;
-use numpy::{PyArray1, PyArrayMethods};
-use pyo3::prelude::*;
-use pyo3::types::PyDict;
-use std::sync::{Arc, Mutex};
+use numpy::PyReadonlyArray1;
+use pyo3::{prelude::*, types::PyDict};
+use std::{
+    collections::HashMap,
+    env,
+    str::FromStr,
+    sync::{Arc, Mutex},
+};
 
-use crate::gym::EnvConfig;
+use crate::gym::{act::ToControls, obs::FromAircraft, setup_app, EnvConfig};
 
 #[pyclass(name = "FlyerEnv", unsendable)]
 pub struct FlyerEnv {
@@ -21,41 +24,53 @@ pub struct FlyerEnv {
 #[pymethods]
 impl FlyerEnv {
     #[new]
-    fn new(config_dict: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
+    fn new(
+        config_dict: Option<&Bound<'_, PyDict>>,
+        render_mode: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
         // Parse configuration
-        let config = if let Some(dict) = config_dict {
+        let mut config = if let Some(dict) = config_dict {
             EnvConfig::from_pydict(dict)?
         } else {
             EnvConfig::default()
         };
 
+        // Set render_mode
+        let render_mode = if let Some(render_py) = render_mode {
+            if let Ok(render_str) = render_py.extract::<&str>() {
+                RenderMode::from_str(render_str).map_err(|err| {
+                    pyo3::exceptions::PyValueError::new_err(format!("Invalid render mode: {}", err))
+                })?
+            } else {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "Render mode must be a string",
+                ));
+            }
+        } else {
+            RenderMode::Human
+        };
+
+        config.agent_config.mode = render_mode;
+
         // Create Bevy app
         let mut app = App::new();
 
-        // Add minimal base plugin
-        app.add_plugins(MinimalPlugins);
+        // Get asset directorys in correct location
+        let current_dir = env::current_dir().unwrap();
+        let asset_path = current_dir
+            .join("pyflyer-rs/flyer-rs/assets")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        app = setup_app(app, config.clone(), asset_path);
 
         // Create shared agent state
         let agent_state = AgentState::new(&config.agent_config);
         let agent_state_arc = Arc::new(Mutex::new(agent_state));
         let agent_state_clone = agent_state_arc.clone();
 
-        // Create core interaction plugins (including terrain)
-        app.add_plugins((
-            TransformationPlugin::new(1.0),
-            TerrainPlugin::with_config(config.terrain_config.clone()),
-        ));
-
-        // Add plugin for each aircraft configuration (ususally just one)
-        for aircraft_config in config.aircraft_configs.iter() {
-            add_aircraft_plugin(&mut app, aircraft_config.1.clone());
-        }
-
-        // Load camera plugin
-        app.add_plugins(CameraPlugin);
-
-        // Create agent plugin
-        app.add_plugins(AgentPlugin::new(config.agent_config.clone()));
+        app.run();
 
         Ok(Self {
             app,
@@ -64,7 +79,10 @@ impl FlyerEnv {
         })
     }
 
-    fn reset<'py>(&mut self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, Bound<'py, PyDict>)> {
+    fn reset<'py>(
+        &mut self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyDict>, Bound<'py, PyDict>)> {
         if let Ok(mut state) = self.state.lock() {
             state.episode_count += 1;
             state.current_step = 0;
@@ -83,33 +101,28 @@ impl FlyerEnv {
     fn step<'py>(
         &mut self,
         py: Python<'py>,
-        action: &Bound<'py, PyAny>,
-    ) -> PyResult<(Bound<'py, PyAny>, f64, bool, bool, Bound<'py, PyDict>)> {
-        // Convert python Action to aircraft controls
-        let action_array = action.downcast::<PyArray1<f64>>()?;
-        let action_readonly = action_array.readonly();
+        action: &Bound<'py, PyDict>,
+    ) -> PyResult<(Bound<'py, PyDict>, f64, bool, bool, Bound<'py, PyDict>)> {
+        // Vaidate actions against configured aircraft
+        for key in action.keys() {
+            let id = key.extract::<String>()?;
+            if !self.config.action_spaces.contains_key(&id) {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Received action for unconfigured aircraft {}",
+                    id
+                )));
+            }
+        }
 
-        // let controls = match self.action_space.to_controls(py, action_readonly) {
-        //     AircraftControls::Dubins(controls) => controls,
-        //     AircraftControls::Full(_) => {
-        //         return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-        //             "Full aircraft controls not supported yet",
-        //         ))
-        //     }
-        // };
-
-        // TODO: Move this to apply_action plugin system
-        let world = &mut self.app.world_mut();
-        let mut query = world.query_filtered::<&mut DubinsAircraftState, With<PlayerController>>();
-        // if let Ok(mut aircraft_state) = query.get_single_mut(world) {
-        //     aircraft_state.controls = controls;
-        // };
+        // Update action queue with validated actions
+        self.update_action_queue(py, action)?;
 
         // Step simulation
-        for _ in 0..self.config.steps_per_action {
-            // self.elapsed_time += self.config.time_step;
-            self.app.update();
-        }
+        self.app.update();
+        // for _ in 0..self.config.steps_per_action {
+        //     // self.elapsed_time += self.config.time_step;
+        //     self.app.update();
+        // }
 
         // Calculate reward
         let reward = self.calculate_reward();
@@ -160,36 +173,84 @@ impl FlyerEnv {
     }
 
     #[getter]
-    fn get_observation<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        // Get the current observation
-        // let world = &mut self.app.world_mut();
-        // let mut query = world.query_filtered::<&DubinsAircraftState, With<PlayerController>>();
+    fn get_observation<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let obs_dict = PyDict::new(py);
 
-        // if let Ok(aircraft_state) = query.get_single(world) {
-        //     // Convert to observation based on the observation space type
-        //     match self.observation_space {
-        //         ObservationSpace::ContinuousDubinsObs => {
-        //             // Create observation from aircraft state
-        //             let obs = ContinuousDubinsObs::from_aircraft(*aircraft_state);
+        if let Ok(state) = self.state.lock() {
+            if let Ok(state_buffer) = state.state_buffer.lock() {
+                // Process each aircraft state in the buffer
+                for (id, aircraft_state) in state_buffer.iter() {
+                    // Get the identifier string
+                    let id_str = match id {
+                        Id::Named(name) => name.clone(),
+                        Id::Entity(entity) => format!("entity_{:?}", entity),
+                    };
 
-        //             // Convert to numpy array
-        //             let observation = vec![
-        //                 obs.heading,  // Heading angle in radians
-        //                 obs.altitude, // Altitude in meters
-        //                 obs.airspeed, // Airspeed in m/s
-        //             ];
+                    // Get the corresponding observation space configuration
+                    if let Some(obs_space) = self.config.observation_spaces.get(&id_str) {
+                        // Convert aircraft state to numpy array using FromAircraft trait
+                        let np_array = obs_space.from_aircraft(py, aircraft_state)?;
+                        obs_dict.set_item(id_str, np_array)?;
+                    } else {
+                        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                            "No observation space configured for aircraft {}",
+                            id_str
+                        )));
+                    }
+                }
 
-        //             // Create and return numpy array
-        //             let np_array = PyArray1::from_vec(py, observation);
-        //             Ok(np_array.into_any())
-        //         }
-        //     }
-        // } else {
-        //     // Return error if we couldn't get the aircraft state
-        //     Err(ConfigError::ValidationError("Could not get aircraft state".into()).into())
-        // }
+                Ok(obs_dict)
+            } else {
+                Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    "Failed to acquire state buffer lock",
+                ))
+            }
+        } else {
+            Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                "Failed to acquire state lock",
+            ))
+        }
+    }
 
-        todo!("Implement get_observation method")
+    fn update_action_queue<'py>(
+        &mut self,
+        py: Python<'py>,
+        action: &Bound<'py, PyDict>,
+    ) -> PyResult<()> {
+        let mut new_actions = HashMap::new();
+
+        // Get a lock on state
+        if let Ok(state) = self.state.lock() {
+            for (key, value) in action.iter() {
+                let id_str = key.extract::<String>()?;
+                let id = Id::Named(id_str.clone());
+
+                if let Some(action_space) = self.config.action_spaces.get(&id_str) {
+                    let array: PyReadonlyArray1<f64> = value.extract()?;
+                    let controls = action_space.to_controls(py, array);
+                    new_actions.insert(id.into(), controls);
+                } else {
+                    return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "No action space configured for aircraft {}",
+                        id_str
+                    )));
+                }
+            }
+
+            // Update the action queue
+            if let Ok(mut action_queue) = state.action_queue.lock() {
+                *action_queue = new_actions;
+                Ok(())
+            } else {
+                Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    "Failed to acquire action queue lock",
+                ))
+            }
+        } else {
+            Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                "Failed to acquire state lock",
+            ))
+        }
     }
 
     fn build_info_dict<'py>(&self, py: Python<'py>) -> Bound<'py, PyDict> {
