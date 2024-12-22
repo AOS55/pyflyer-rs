@@ -1,10 +1,11 @@
 use bevy::prelude::*;
 use flyer::{
-    plugins::Id,
+    plugins::{Id, LatestFrame},
     resources::{AgentState, RenderMode},
 };
-use numpy::PyReadonlyArray1;
-use pyo3::{prelude::*, types::PyDict};
+use ndarray::Array3;
+use numpy::{IntoPyArray, PyArrayDyn, PyArrayMethods, PyReadonlyArray1};
+use pyo3::{exceptions::PyValueError, prelude::*, types::PyDict};
 use std::{
     collections::HashMap,
     env,
@@ -137,9 +138,32 @@ impl FlyerEnv {
         Ok((observation, reward, terminated, truncated, info))
     }
 
-    fn render<'py>(&mut self, py: Python<'_>, mode: Option<String>) -> PyResult<Bound<'py, PyAny>> {
-        // Render the simulation/game
-        todo!("Implement render method")
+    fn render<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let latest_frame = self.app.world().resource::<LatestFrame>();
+
+        if latest_frame.data.is_empty() {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                "No frame data available",
+            ));
+        }
+
+        // Dimensions
+        let (height, width) = (latest_frame.height as usize, latest_frame.width as usize);
+        let shape_3d = (height, width, 4);
+
+        // Clone the Vec<u8> so we can build an `Array3`
+        let data: Vec<u8> = latest_frame.data.clone();
+
+        // Build an ndarray `Array3<u8>` from the Vec
+        let array_3d = Array3::from_shape_vec(shape_3d, data)
+            .map_err(|_| PyValueError::new_err("Invalid shape for the given image dimensions"))?;
+
+        // Convert the ndarray to a Python `PyArray`
+        // `into_pyarray` is from the `IntoPyArray` trait
+        let py_array = array_3d.into_pyarray(py);
+
+        // If you need a PyObject, convert it:
+        Ok(py_array.to_object(py).into_bound(py))
     }
 
     #[getter]
