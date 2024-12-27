@@ -50,6 +50,7 @@ pub fn setup_app(mut app: App, config: EnvConfig, asset_path: String) -> App {
                         ..default()
                     }),
             );
+            app.add_plugins(CameraPlugin);
         }
         RenderMode::RGBArray => {
             println!("Running RGBArray Mode");
