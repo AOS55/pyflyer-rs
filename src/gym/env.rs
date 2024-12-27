@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use flyer::{
     plugins::{Id, LatestFrame},
     resources::{AgentState, RenderMode, StepCommand, UpdateControl},
@@ -17,9 +18,40 @@ use crate::gym::{act::ToControls, obs::FromAircraft, setup_app, EnvConfig};
 
 #[pyclass(name = "FlyerEnv", unsendable)]
 pub struct FlyerEnv {
-    app: App,
+    app_handle: Option<std::thread::JoinHandle<()>>,
     state: Arc<Mutex<AgentState>>,
     config: EnvConfig,
+    app_tx: Sender<AppCommand>,
+}
+
+#[derive(Resource)]
+struct CommandReceiver {
+    pub receiver: Receiver<AppCommand>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum AppCommand {
+    Update,
+    Step(usize),
+    Exit,
+}
+
+fn handle_commands(
+    mut exit: EventWriter<AppExit>,
+    receiver: Res<CommandReceiver>,
+    mut update_control: ResMut<UpdateControl>,
+) {
+    while let Ok(command) = receiver.receiver.try_recv() {
+        match command {
+            AppCommand::Update => {}
+            AppCommand::Step(steps) => {
+                update_control.remaining_steps = steps;
+            }
+            AppCommand::Exit => {
+                exit.send(AppExit::Success);
+            }
+        }
+    }
 }
 
 #[pymethods]
@@ -53,8 +85,13 @@ impl FlyerEnv {
 
         config.agent_config.mode = render_mode;
 
-        // Create Bevy app
-        let mut app = App::new();
+        // Create channel for app communication
+        let (tx, rx) = unbounded::<AppCommand>();
+
+        // Create shared agent state
+        let agent_state = AgentState::new(&config.agent_config);
+        let agent_state_arc = Arc::new(Mutex::new(agent_state));
+        let agent_state_clone = agent_state_arc.clone();
 
         // Get asset directorys in correct location
         let current_dir = env::current_dir().unwrap();
@@ -64,25 +101,30 @@ impl FlyerEnv {
             .unwrap()
             .to_string();
 
-        info!("Pre App setup");
-        app = setup_app(app, config.clone(), asset_path);
-        info!("Post App setup");
+        // Clone necessary values for the thread
+        let config_clone = config.clone();
 
-        // Create shared agent state
-        let agent_state = AgentState::new(&config.agent_config);
-        let agent_state_arc = Arc::new(Mutex::new(agent_state));
-        let agent_state_clone = agent_state_arc.clone();
+        // Spawn Bevy app in separate thread
+        let app_handle = std::thread::spawn(move || {
+            let mut app = App::new();
 
-        info!("Got to app run!");
+            info!("Pre App setup");
+            app = setup_app(app, config_clone, asset_path);
 
-        app.run();
+            // Add command handling
+            app.insert_resource(CommandReceiver { receiver: rx });
+            app.add_systems(Update, handle_commands);
 
-        info!("App running");
+            info!("Post App setup");
+
+            app.run();
+        });
 
         Ok(Self {
-            app,
+            app_handle: Some(app_handle),
             state: agent_state_clone,
             config,
+            app_tx: tx,
         })
     }
 
@@ -96,8 +138,6 @@ impl FlyerEnv {
             state.terminated = false;
             state.truncated = false;
         }
-
-        self.app.update();
 
         let initial_obs = self.get_observation(py)?;
         let initial_info = self.build_info_dict(py);
@@ -128,20 +168,24 @@ impl FlyerEnv {
             "Sending StepCommand event with steps: {}",
             self.config.steps_per_action
         );
-        // Update the number of executions the environment should perform
-        self.app.world_mut().send_event(StepCommand {
-            steps: self.config.steps_per_action,
-        });
 
-        self.app.update();
+        // Send step command through channel
+        self.app_tx
+            .send(AppCommand::Step(self.config.steps_per_action))
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "Failed to send step command: {}",
+                    e
+                ))
+            })?;
 
-        while self.app.world().resource::<UpdateControl>().remaining_steps > 0 {
-            info!(
-                "Running update with remaining steps: {}",
-                self.app.world().resource::<UpdateControl>().remaining_steps
-            );
-            self.app.update();
-        }
+        // Send update command to process the step
+        self.app_tx.send(AppCommand::Update).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to send update command: {}",
+                e
+            ))
+        })?;
 
         // Calculate reward
         let reward = self.calculate_reward();
@@ -157,31 +201,33 @@ impl FlyerEnv {
     }
 
     fn render<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let latest_frame = self.app.world().resource::<LatestFrame>();
+        todo!("Implement render method")
 
-        if latest_frame.data.is_empty() {
-            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                "No frame data available",
-            ));
-        }
+        // let latest_frame = self.app.world().resource::<LatestFrame>();
 
-        // Dimensions
-        let (height, width) = (latest_frame.height as usize, latest_frame.width as usize);
-        let shape_3d = (height, width, 4);
+        // if latest_frame.data.is_empty() {
+        //     return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+        //         "No frame data available",
+        //     ));
+        // }
 
-        // Clone the Vec<u8> so we can build an `Array3`
-        let data: Vec<u8> = latest_frame.data.clone();
+        // // Dimensions
+        // let (height, width) = (latest_frame.height as usize, latest_frame.width as usize);
+        // let shape_3d = (height, width, 4);
 
-        // Build an ndarray `Array3<u8>` from the Vec
-        let array_3d = Array3::from_shape_vec(shape_3d, data)
-            .map_err(|_| PyValueError::new_err("Invalid shape for the given image dimensions"))?;
+        // // Clone the Vec<u8> so we can build an `Array3`
+        // let data: Vec<u8> = latest_frame.data.clone();
 
-        // Convert the ndarray to a Python `PyArray`
-        // `into_pyarray` is from the `IntoPyArray` trait
-        let py_array = array_3d.into_pyarray(py);
+        // // Build an ndarray `Array3<u8>` from the Vec
+        // let array_3d = Array3::from_shape_vec(shape_3d, data)
+        //     .map_err(|_| PyValueError::new_err("Invalid shape for the given image dimensions"))?;
 
-        // If you need a PyObject, convert it:
-        Ok(py_array.to_object(py).into_bound(py))
+        // // Convert the ndarray to a Python `PyArray`
+        // // `into_pyarray` is from the `IntoPyArray` trait
+        // let py_array = array_3d.into_pyarray(py);
+
+        // // If you need a PyObject, convert it:
+        // Ok(py_array.to_object(py).into_bound(py))
     }
 
     #[getter]
@@ -308,12 +354,13 @@ impl FlyerEnv {
 
     fn check_termination(&mut self) -> (bool, bool) {
         // Check episode termination
-        todo!("Implement termination check");
+        // todo!("Implement termination check");
         // let terminated = false;
 
         // // Check truncation
         // let truncated = self.state.steps_count >= self.config.max_episode_steps;
 
         // return (terminated, truncated);
+        (false, false)
     }
 }

@@ -31,7 +31,7 @@ use terrain::TerrainConfigBuilder;
 pub struct EnvConfigBuilder {
     rng_manager: Option<RngManager>,
     max_episode_steps: Option<u32>,
-    steps_per_action: Option<u32>,
+    steps_per_action: Option<usize>,
     time_step: Option<f64>,
     aircraft_builders: HashMap<String, AircraftBuilderEnum>,
     action_builders: HashMap<String, ActionSpaceBuilder>,
@@ -72,7 +72,7 @@ impl EnvConfigBuilder {
         self
     }
 
-    pub fn steps_per_action(mut self, steps: u32) -> Self {
+    pub fn steps_per_action(mut self, steps: usize) -> Self {
         self.steps_per_action = Some(steps);
         self
     }

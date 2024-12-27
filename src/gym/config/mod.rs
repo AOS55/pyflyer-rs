@@ -23,7 +23,7 @@ pub struct EnvConfig {
 
     // Time Configuration
     pub max_episode_steps: u32,
-    pub steps_per_action: u32,
+    pub steps_per_action: usize,
     pub time_step: f64,
 
     // Method to update
