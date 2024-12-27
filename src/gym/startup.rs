@@ -1,10 +1,13 @@
-use bevy::prelude::*;
+use bevy::{
+    app::{AppExit, ScheduleRunnerPlugin},
+    prelude::*,
+};
 use flyer::{
     plugins::{
         add_aircraft_plugin, AgentPlugin, CameraPlugin, HeadlessPlugin, StartupSequencePlugin,
         TerrainPlugin, TransformationPlugin,
     },
-    resources::RenderMode,
+    resources::{RenderMode, StepCommand, UpdateControl, UpdateControlPlugin},
     systems::camera_follow_system,
 };
 
@@ -16,6 +19,7 @@ pub fn setup_app(mut app: App, config: EnvConfig, asset_path: String) -> App {
     app.add_plugins((
         TransformationPlugin::new(1.0),
         AgentPlugin::new(config.agent_config),
+        UpdateControlPlugin,
     ));
 
     for aircraft_config in config.aircraft_configs.iter() {
@@ -55,6 +59,7 @@ pub fn setup_app(mut app: App, config: EnvConfig, asset_path: String) -> App {
                 asset_path,
             ))
             .add_systems(FixedUpdate, camera_follow_system);
+            // .insert_resource(Time::<Fixed>::from_seconds(1.0 / 60.0));
         }
     }
 

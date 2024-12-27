@@ -1,6 +1,8 @@
 use flyer::{
     components::{AircraftConfig, TerminalConditions},
-    resources::{AgentConfig, EnvironmentConfig, PhysicsConfig, RewardWeights, TerrainConfig},
+    resources::{
+        AgentConfig, EnvironmentConfig, PhysicsConfig, RewardWeights, TerrainConfig, UpdateMode,
+    },
 };
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -23,6 +25,9 @@ pub struct EnvConfig {
     pub max_episode_steps: u32,
     pub steps_per_action: u32,
     pub time_step: f64,
+
+    // Method to update
+    pub update_mode: UpdateMode,
 
     // Aircraft Configuration
     pub aircraft_configs: HashMap<String, AircraftConfig>,

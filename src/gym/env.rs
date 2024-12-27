@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use flyer::{
     plugins::{Id, LatestFrame},
-    resources::{AgentState, RenderMode},
+    resources::{AgentState, RenderMode, StepCommand, UpdateControl},
 };
 use ndarray::Array3;
 use numpy::{IntoPyArray, PyArrayDyn, PyArrayMethods, PyReadonlyArray1};
@@ -64,14 +64,20 @@ impl FlyerEnv {
             .unwrap()
             .to_string();
 
+        info!("Pre App setup");
         app = setup_app(app, config.clone(), asset_path);
+        info!("Post App setup");
 
         // Create shared agent state
         let agent_state = AgentState::new(&config.agent_config);
         let agent_state_arc = Arc::new(Mutex::new(agent_state));
         let agent_state_clone = agent_state_arc.clone();
 
+        info!("Got to app run!");
+
         app.run();
+
+        info!("App running");
 
         Ok(Self {
             app,
@@ -118,12 +124,24 @@ impl FlyerEnv {
         // Update action queue with validated actions
         self.update_action_queue(py, action)?;
 
-        // Step simulation
+        info!(
+            "Sending StepCommand event with steps: {}",
+            self.config.steps_per_action
+        );
+        // Update the number of executions the environment should perform
+        self.app.world_mut().send_event(StepCommand {
+            steps: self.config.steps_per_action,
+        });
+
         self.app.update();
-        // for _ in 0..self.config.steps_per_action {
-        //     // self.elapsed_time += self.config.time_step;
-        //     self.app.update();
-        // }
+
+        while self.app.world().resource::<UpdateControl>().remaining_steps > 0 {
+            info!(
+                "Running update with remaining steps: {}",
+                self.app.world().resource::<UpdateControl>().remaining_steps
+            );
+            self.app.update();
+        }
 
         // Calculate reward
         let reward = self.calculate_reward();

@@ -1,5 +1,5 @@
 use flyer::components::AircraftConfig;
-use flyer::resources::AgentConfig;
+use flyer::resources::{AgentConfig, UpdateMode};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use rand;
@@ -179,8 +179,9 @@ impl EnvConfigBuilder {
 
         Ok(EnvConfig {
             seed: rng_manager.master_seed(),
+            update_mode: UpdateMode::Gym,
             max_episode_steps: self.max_episode_steps.unwrap_or(1000),
-            steps_per_action: self.steps_per_action.unwrap_or(4),
+            steps_per_action: self.steps_per_action.unwrap_or(10),
             time_step: self.time_step.unwrap_or(1.0 / 60.0),
             aircraft_configs,
             action_spaces,
