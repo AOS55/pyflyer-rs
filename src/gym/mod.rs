@@ -2,7 +2,6 @@ mod act;
 mod config;
 mod env;
 mod obs;
-mod spaces;
 mod startup;
 
 pub use act::ActionSpace;
