@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 
-mod gym;
+pub mod gym;
 pub mod utils;
 
 #[pymodule]

@@ -3910,6 +3910,7 @@ dependencies = [
  "aerso 0.1.0 (git+https://github.com/rob-clarke/aerso.git)",
  "argmin",
  "bevy",
+ "crossbeam-channel",
  "flyer",
  "glam 0.24.2",
  "nalgebra",
@@ -3918,6 +3919,9 @@ dependencies = [
  "pyo3",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
+ "serde",
+ "serde_json",
+ "serde_yaml",
  "tiny-skia",
 ]
 

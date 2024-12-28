@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use flyer::{
     plugins::{Id, LatestFrame},
@@ -18,39 +19,56 @@ use crate::gym::{act::ToControls, obs::FromAircraft, setup_app, EnvConfig};
 
 #[pyclass(name = "FlyerEnv", unsendable)]
 pub struct FlyerEnv {
-    app_handle: Option<std::thread::JoinHandle<()>>,
+    app: App,
     state: Arc<Mutex<AgentState>>,
     config: EnvConfig,
-    app_tx: Sender<AppCommand>,
 }
+
+// #[derive(Resource)]
+// struct CommandReceiver {
+//     pub receiver: Receiver<AppCommand>,
+// }
+
+// #[derive(Debug, Clone, Copy)]
+// pub enum AppCommand {
+//     Update,
+//     Step(usize),
+//     Exit,
+// }
+
+// fn handle_commands(
+//     mut exit: EventWriter<AppExit>,
+//     receiver: Res<CommandReceiver>,
+//     mut update_control: ResMut<UpdateControl>,
+// ) {
+//     while let Ok(command) = receiver.receiver.try_recv() {
+//         match command {
+//             AppCommand::Update => {}
+//             AppCommand::Step(steps) => {
+//                 update_control.remaining_steps = steps;
+//             }
+//             AppCommand::Exit => {
+//                 exit.send(AppExit::Success);
+//             }
+//         }
+//     }
+// }
 
 #[derive(Resource)]
-struct CommandReceiver {
-    pub receiver: Receiver<AppCommand>,
+struct StepState {
+    needs_step: bool,
+    step_count: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum AppCommand {
-    Update,
-    Step(usize),
-    Exit,
-}
-
-fn handle_commands(
-    mut exit: EventWriter<AppExit>,
-    receiver: Res<CommandReceiver>,
+fn handle_stepping(
+    mut state: ResMut<StepState>,
     mut update_control: ResMut<UpdateControl>,
+    // Use window query to force main thread
+    _window: Query<&Window, With<PrimaryWindow>>,
 ) {
-    while let Ok(command) = receiver.receiver.try_recv() {
-        match command {
-            AppCommand::Update => {}
-            AppCommand::Step(steps) => {
-                update_control.remaining_steps = steps;
-            }
-            AppCommand::Exit => {
-                exit.send(AppExit::Success);
-            }
-        }
+    if state.needs_step {
+        update_control.remaining_steps = state.step_count;
+        state.needs_step = false;
     }
 }
 
@@ -85,13 +103,10 @@ impl FlyerEnv {
 
         config.agent_config.mode = render_mode;
 
-        // Create channel for app communication
-        let (tx, rx) = unbounded::<AppCommand>();
+        // // Create channel for app communication
+        // let (tx, rx) = unbounded::<AppCommand>();
 
-        // Create shared agent state
-        let agent_state = AgentState::new(&config.agent_config);
-        let agent_state_arc = Arc::new(Mutex::new(agent_state));
-        let agent_state_clone = agent_state_arc.clone();
+        let mut app = App::new();
 
         // Get asset directorys in correct location
         let current_dir = env::current_dir().unwrap();
@@ -101,30 +116,44 @@ impl FlyerEnv {
             .unwrap()
             .to_string();
 
-        // Clone necessary values for the thread
-        let config_clone = config.clone();
+        info!("Pre App setup");
+        app = setup_app(app, config.clone(), asset_path);
 
-        // Spawn Bevy app in separate thread
-        let app_handle = std::thread::spawn(move || {
-            let mut app = App::new();
-
-            info!("Pre App setup");
-            app = setup_app(app, config_clone, asset_path);
-
-            // Add command handling
-            app.insert_resource(CommandReceiver { receiver: rx });
-            app.add_systems(Update, handle_commands);
-
-            info!("Post App setup");
-
-            app.run();
+        // Add our stepping state and system
+        app.insert_resource(StepState {
+            needs_step: false,
+            step_count: 0,
         });
+        app.add_systems(Update, handle_stepping);
+
+        // // Spawn Bevy app in separate thread
+        // let app_handle = std::thread::spawn(move || {
+        //     let mut app = App::new();
+
+        //     info!("Pre App setup");
+        //     app = setup_app(app, config_clone, asset_path);
+
+        //     // Add command handling
+        //     app.insert_resource(CommandReceiver { receiver: rx });
+        //     app.add_systems(Update, handle_commands);
+
+        //     info!("Post App setup");
+
+        //     app.run();
+        // });
+
+        // Create shared agent state
+        let agent_state = AgentState::new(&config.agent_config);
+        let agent_state_arc = Arc::new(Mutex::new(agent_state));
+        let agent_state_clone = agent_state_arc.clone();
+
+        // Start the app running in the main thread
+        app.run();
 
         Ok(Self {
-            app_handle: Some(app_handle),
+            app,
             state: agent_state_clone,
             config,
-            app_tx: tx,
         })
     }
 
@@ -164,28 +193,12 @@ impl FlyerEnv {
         // Update action queue with validated actions
         self.update_action_queue(py, action)?;
 
-        info!(
-            "Sending StepCommand event with steps: {}",
-            self.config.steps_per_action
-        );
-
-        // Send step command through channel
-        self.app_tx
-            .send(AppCommand::Step(self.config.steps_per_action))
-            .map_err(|e| {
-                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                    "Failed to send step command: {}",
-                    e
-                ))
-            })?;
-
-        // Send update command to process the step
-        self.app_tx.send(AppCommand::Update).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to send update command: {}",
-                e
-            ))
-        })?;
+        // Request step on main thread
+        {
+            let mut state = self.app.world_mut().resource_mut::<StepState>();
+            state.needs_step = true;
+            state.step_count = self.config.steps_per_action;
+        }
 
         // Calculate reward
         let reward = self.calculate_reward();
