@@ -1,7 +1,10 @@
+use serde::{Deserialize, Serialize};
+
 use crate::gym::config::ConfigError;
 use crate::gym::obs::ContinuousObservationSpace;
 use crate::gym::ObservationSpace;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObservationSpaceBuilder {
     obs_space: Option<ObservationSpace>,
 }

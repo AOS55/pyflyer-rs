@@ -4,11 +4,10 @@ use flyer::{
         AgentConfig, EnvironmentConfig, PhysicsConfig, RewardWeights, TerrainConfig, UpdateMode,
     },
 };
-use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use serde_json::Value;
 use std::collections::HashMap;
 
-use crate::gym::{ActionSpace, ObservationSpace};
+pub use crate::gym::{config::ConfigError, ActionSpace, ObservationSpace};
 
 mod builders;
 mod errors;
@@ -52,9 +51,9 @@ pub struct EnvConfig {
 }
 
 impl EnvConfig {
-    pub fn from_pydict(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
-        let builder = EnvConfigBuilder::from_pydict(dict)?;
-        builder.build().map_err(Into::into)
+    pub fn from_json(json_str: &Value) -> Result<Self, ConfigError> {
+        let builder = EnvConfigBuilder::from_json(json_str)?;
+        builder.build()
     }
 }
 

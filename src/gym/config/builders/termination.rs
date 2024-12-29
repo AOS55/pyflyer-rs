@@ -1,9 +1,11 @@
 use flyer::components::TerminalConditions;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use serde::{Deserialize, Serialize};
 
 use crate::gym::config::errors::ConfigError;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalConditionsBuilder;
 
 impl Default for TerminalConditionsBuilder {

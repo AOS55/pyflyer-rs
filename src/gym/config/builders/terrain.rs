@@ -4,12 +4,12 @@ use flyer::resources::{
     NoiseConfig, TerrainConfig,
 };
 use flyer::systems::terrain::noise::NoiseLayer;
-use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::gym::config::errors::ConfigError;
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct TerrainConfigBuilder {
     noise_builder: NoiseConfigBuilder,
     biome_builder: BiomeConfigBuilder,
@@ -37,25 +37,19 @@ impl TerrainConfigBuilder {
         self
     }
 
-    pub fn from_pydict(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
+    pub fn from_json(value: &Value) -> Result<Self, ConfigError> {
         let mut builder = Self::new();
 
-        if let Some(noise_dict) = dict.get_item("noise")? {
-            if let Ok(dict) = noise_dict.downcast::<PyDict>() {
-                builder = builder.noise_config(NoiseConfigBuilder::from_pydict(&dict)?);
-            }
+        if let Some(noise_config) = value.get("noise") {
+            builder = builder.noise_config(NoiseConfigBuilder::from_json(noise_config)?);
         }
 
-        if let Some(biome_dict) = dict.get_item("biome")? {
-            if let Ok(dict) = biome_dict.downcast::<PyDict>() {
-                builder = builder.biome_config(BiomeConfigBuilder::from_pydict(&dict)?);
-            }
+        if let Some(biome_config) = value.get("biome") {
+            builder = builder.biome_config(BiomeConfigBuilder::from_json(biome_config)?);
         }
 
-        if let Some(feature_dict) = dict.get_item("feature")? {
-            if let Ok(dict) = feature_dict.downcast::<PyDict>() {
-                builder = builder.feature_config(FeatureConfigBuilder::from_pydict(&dict)?);
-            }
+        if let Some(feature_config) = value.get("feature") {
+            builder = builder.feature_config(FeatureConfigBuilder::from_json(feature_config)?);
         }
 
         Ok(builder)
@@ -74,7 +68,7 @@ impl TerrainConfigBuilder {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, Serialize, Deserialize, Debug)]
 pub struct NoiseConfigBuilder {
     height: Option<HeightNoiseConfigBuilder>,
 }
@@ -89,13 +83,11 @@ impl NoiseConfigBuilder {
         self
     }
 
-    pub fn from_pydict(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
+    pub fn from_json(value: &Value) -> Result<Self, ConfigError> {
         let mut builder = Self::new();
 
-        if let Some(height_dict) = dict.get_item("height")? {
-            if let Ok(dict) = height_dict.downcast::<PyDict>() {
-                builder = builder.height_noise(HeightNoiseConfigBuilder::from_pydict(&dict)?);
-            }
+        if let Some(height_config) = value.get("height") {
+            builder = builder.height_noise(HeightNoiseConfigBuilder::from_json(height_config)?);
         }
 
         Ok(builder)
@@ -110,7 +102,7 @@ impl NoiseConfigBuilder {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, Serialize, Deserialize, Debug)]
 pub struct HeightNoiseConfigBuilder {
     scale: Option<f32>,
     octaves: Option<u32>,
@@ -149,78 +141,26 @@ impl HeightNoiseConfigBuilder {
         self
     }
 
-    pub fn from_pydict(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
+    pub fn from_json(value: &Value) -> Result<Self, ConfigError> {
         let mut builder = Self::new();
 
-        if let Some(scale) = dict.get_item("scale")? {
-            builder = builder.scale(scale.extract()?);
+        if let Some(scale) = value.get("scale").and_then(|v| v.as_f64()) {
+            builder = builder.scale(scale as f32);
         }
-        if let Some(octaves) = dict.get_item("octaves")? {
-            builder = builder.octaves(octaves.extract()?);
+        if let Some(octaves) = value.get("octaves").and_then(|v| v.as_u64()) {
+            builder = builder.octaves(octaves as u32);
         }
-        if let Some(persistence) = dict.get_item("persistence")? {
-            builder = builder.persistence(persistence.extract()?);
+        if let Some(persistence) = value.get("persistence").and_then(|v| v.as_f64()) {
+            builder = builder.persistence(persistence as f32);
         }
-        if let Some(lacunarity) = dict.get_item("lacunarity")? {
-            builder = builder.lacunarity(lacunarity.extract()?);
-        }
-
-        fn parse_noise_layer(dict: &Bound<'_, PyDict>) -> PyResult<NoiseLayer> {
-            let scale: f32 = dict
-                .get_item("scale")?
-                .ok_or_else(|| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                        "scale is required for noise layer",
-                    )
-                })?
-                .extract()?;
-
-            let amplitude: f32 = dict
-                .get_item("amplitude")?
-                .ok_or_else(|| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                        "amplitude is required for noise layer",
-                    )
-                })?
-                .extract()?;
-
-            let octaves: u32 = dict
-                .get_item("octaves")?
-                .ok_or_else(|| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                        "octaves is required for noise layer",
-                    )
-                })?
-                .extract()?;
-
-            let mut layer = NoiseLayer::new(scale, amplitude, octaves);
-
-            // Optional parameters
-            if let Some(persistence) = dict.get_item("persistence")? {
-                layer = layer.with_persistence(persistence.extract()?);
-            }
-
-            if let Some(weight) = dict.get_item("weight")? {
-                layer = layer.with_weight(weight.extract()?);
-            }
-
-            if let Some(offset_x) = dict.get_item("offset_x")? {
-                if let Some(offset_y) = dict.get_item("offset_y")? {
-                    layer = layer.with_offset(Vec2::new(offset_x.extract()?, offset_y.extract()?));
-                }
-            }
-
-            Ok(layer)
+        if let Some(lacunarity) = value.get("lacunarity").and_then(|v| v.as_f64()) {
+            builder = builder.lacunarity(lacunarity as f32);
         }
 
-        if let Some(layers_item) = dict.get_item("layers")? {
-            if let Ok(layers_list) = layers_item.downcast::<PyList>() {
-                for layer in layers_list {
-                    if let Ok(layer_dict) = layer.downcast::<PyDict>() {
-                        if let Ok(noise_layer) = parse_noise_layer(&layer_dict) {
-                            builder = builder.add_layer(noise_layer);
-                        }
-                    }
+        if let Some(layers) = value.get("layers").and_then(|v| v.as_array()) {
+            for layer_value in layers {
+                if let Some(noise_layer) = parse_noise_layer(layer_value)? {
+                    builder = builder.add_layer(noise_layer);
                 }
             }
         }
@@ -239,7 +179,46 @@ impl HeightNoiseConfigBuilder {
     }
 }
 
-#[derive(Default)]
+fn parse_noise_layer(value: &Value) -> Result<Option<NoiseLayer>, ConfigError> {
+    let scale =
+        value.get("scale").and_then(|v| v.as_f64()).ok_or_else(|| {
+            ConfigError::ValidationError("scale is required for noise layer".into())
+        })? as f32;
+
+    let amplitude = value
+        .get("amplitude")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| {
+            ConfigError::ValidationError("amplitude is required for noise layer".into())
+        })? as f32;
+
+    let octaves = value
+        .get("octaves")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| ConfigError::ValidationError("octaves is required for noise layer".into()))?
+        as u32;
+
+    let mut layer = NoiseLayer::new(scale, amplitude, octaves);
+
+    // Optional parameters
+    if let Some(persistence) = value.get("persistence").and_then(|v| v.as_f64()) {
+        layer = layer.with_persistence(persistence as f32);
+    }
+
+    if let Some(weight) = value.get("weight").and_then(|v| v.as_f64()) {
+        layer = layer.with_weight(weight as f32);
+    }
+
+    if let Some(offset_x) = value.get("offset_x").and_then(|v| v.as_f64()) {
+        if let Some(offset_y) = value.get("offset_y").and_then(|v| v.as_f64()) {
+            layer = layer.with_offset(Vec2::new(offset_x as f32, offset_y as f32));
+        }
+    }
+
+    Ok(Some(layer))
+}
+
+#[derive(Default, Clone, Serialize, Deserialize, Debug)]
 pub struct BiomeConfigBuilder {
     thresholds_builder: BiomeThresholdsBuilder,
 }
@@ -254,13 +233,11 @@ impl BiomeConfigBuilder {
         self
     }
 
-    pub fn from_pydict(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
+    pub fn from_json(value: &Value) -> Result<Self, ConfigError> {
         let mut builder = Self::new();
 
-        if let Some(thresholds_dict) = dict.get_item("thresholds")? {
-            if let Ok(dict) = thresholds_dict.downcast::<PyDict>() {
-                builder = builder.thresholds(BiomeThresholdsBuilder::from_pydict(&dict)?);
-            }
+        if let Some(thresholds) = value.get("thresholds") {
+            builder = builder.thresholds(BiomeThresholdsBuilder::from_json(thresholds)?);
         }
 
         Ok(builder)
@@ -273,7 +250,7 @@ impl BiomeConfigBuilder {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, Serialize, Deserialize, Debug)]
 pub struct BiomeThresholdsBuilder {
     water: Option<f32>,
     mountain_start: Option<f32>,
@@ -289,92 +266,65 @@ impl BiomeThresholdsBuilder {
         Self::default()
     }
 
-    pub fn water(mut self, threshold: f32) -> Self {
-        self.water = Some(threshold);
-        self
-    }
-
-    pub fn mountain_start(mut self, threshold: f32) -> Self {
-        self.mountain_start = Some(threshold);
-        self
-    }
-
-    pub fn mountain_width(mut self, width: f32) -> Self {
-        self.mountain_width = Some(width);
-        self
-    }
-
-    pub fn beach_width(mut self, width: f32) -> Self {
-        self.beach_width = Some(width);
-        self
-    }
-
-    pub fn forest_moisture(mut self, threshold: f32) -> Self {
-        self.forest_moisture = Some(threshold);
-        self
-    }
-
-    pub fn desert_moisture(mut self, threshold: f32) -> Self {
-        self.desert_moisture = Some(threshold);
-        self
-    }
-
-    pub fn field_sizes(mut self, sizes: [f32; 4]) -> Self {
-        self.field_sizes = Some(sizes);
-        self
-    }
-
-    pub fn from_pydict(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
+    pub fn from_json(value: &Value) -> Result<Self, ConfigError> {
         let mut builder = Self::new();
 
-        if let Some(water) = dict.get_item("water")? {
-            builder = builder.water(water.extract()?);
+        if let Some(water) = value.get("water").and_then(|v| v.as_f64()) {
+            builder.water = Some(water as f32);
+        }
+        if let Some(mountain_start) = value.get("mountain_start").and_then(|v| v.as_f64()) {
+            builder.mountain_start = Some(mountain_start as f32);
+        }
+        if let Some(mountain_width) = value.get("mountain_width").and_then(|v| v.as_f64()) {
+            builder.mountain_width = Some(mountain_width as f32);
+        }
+        if let Some(beach_width) = value.get("beach_width").and_then(|v| v.as_f64()) {
+            builder.beach_width = Some(beach_width as f32);
+        }
+        if let Some(forest_moisture) = value.get("forest_moisture").and_then(|v| v.as_f64()) {
+            builder.forest_moisture = Some(forest_moisture as f32);
+        }
+        if let Some(desert_moisture) = value.get("desert_moisture").and_then(|v| v.as_f64()) {
+            builder.desert_moisture = Some(desert_moisture as f32);
         }
 
-        if let Some(mountain_start) = dict.get_item("mountain_start")? {
-            builder = builder.mountain_start(mountain_start.extract()?);
-        }
-
-        if let Some(mountain_width) = dict.get_item("mountain_width")? {
-            builder = builder.mountain_width(mountain_width.extract()?);
-        }
-
-        if let Some(beach_width) = dict.get_item("beach_width")? {
-            builder = builder.beach_width(beach_width.extract()?);
-        }
-
-        if let Some(forest_moisture) = dict.get_item("forest_moisture")? {
-            builder = builder.forest_moisture(forest_moisture.extract()?);
-        }
-
-        if let Some(desert_moisture) = dict.get_item("desert_moisture")? {
-            builder = builder.desert_moisture(desert_moisture.extract()?);
-        }
-
-        // Handle field sizes array
-        if let Some(field_sizes_py) = dict.get_item("field_sizes")? {
-            if let Ok(sizes) = field_sizes_py.extract::<Vec<f32>>() {
-                if sizes.len() == 4 {
-                    let array: [f32; 4] = sizes.try_into().map_err(|_| {
-                        ConfigError::ValidationError(
-                            "field_sizes must contain exactly 4 values".into(),
-                        )
-                    })?;
-                    builder = builder.field_sizes(array);
-                } else {
-                    return Err(ConfigError::ValidationError(
-                        "field_sizes must contain exactly 4 values".into(),
-                    )
-                    .into());
+        if let Some(field_sizes) = value.get("field_sizes").and_then(|v| v.as_array()) {
+            if field_sizes.len() == 4 {
+                let mut sizes = Vec::with_capacity(4);
+                for value in field_sizes {
+                    if let Some(size) = value.as_f64() {
+                        sizes.push(size as f32);
+                    } else {
+                        return Err(ConfigError::ValidationError(
+                            "field_sizes values must be numbers".into(),
+                        ));
+                    }
                 }
+                builder.field_sizes = Some(sizes.try_into().unwrap()); // Safe because we checked len == 4
+            } else {
+                return Err(ConfigError::ValidationError(
+                    "field_sizes must contain exactly 4 values".into(),
+                ));
             }
         }
 
+        builder.validate_thresholds()?;
         Ok(builder)
     }
 
     pub fn build(self) -> Result<BiomeThresholds, ConfigError> {
-        // Validate thresholds
+        Ok(BiomeThresholds {
+            water: self.water.unwrap_or(0.48),
+            mountain_start: self.mountain_start.unwrap_or(0.75),
+            mountain_width: self.mountain_width.unwrap_or(0.1),
+            beach_width: self.beach_width.unwrap_or(0.025),
+            forest_moisture: self.forest_moisture.unwrap_or(0.95),
+            desert_moisture: self.desert_moisture.unwrap_or(0.2),
+            field_sizes: self.field_sizes.unwrap_or([96.0, 128.0, 256.0, 512.0]),
+        })
+    }
+
+    pub fn validate_thresholds(&self) -> Result<(), ConfigError> {
         if let Some(water) = self.water {
             if !(0.0..=1.0).contains(&water) {
                 return Err(ConfigError::ValidationError(
@@ -391,22 +341,6 @@ impl BiomeThresholdsBuilder {
             }
         }
 
-        // TODO: Change to use the defaults from the aircraft if possible
-        // Create BiomeThresholds with defaults for unspecified values
-        Ok(BiomeThresholds {
-            water: self.water.unwrap_or(0.48),
-            mountain_start: self.mountain_start.unwrap_or(0.75),
-            mountain_width: self.mountain_width.unwrap_or(0.1),
-            beach_width: self.beach_width.unwrap_or(0.025),
-            forest_moisture: self.forest_moisture.unwrap_or(0.95),
-            desert_moisture: self.desert_moisture.unwrap_or(0.2),
-            field_sizes: self.field_sizes.unwrap_or([96.0, 128.0, 256.0, 512.0]),
-        })
-    }
-
-    pub fn validate_thresholds(&self) -> Result<(), ConfigError> {
-        // Additional validation logic can be added here
-        // For example, checking relationships between thresholds
         if let (Some(mountain_start), Some(mountain_width)) =
             (self.mountain_start, self.mountain_width)
         {
@@ -431,7 +365,7 @@ impl BiomeThresholdsBuilder {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, Serialize, Deserialize, Debug)]
 pub struct FeatureConfigBuilder;
 
 impl FeatureConfigBuilder {
@@ -439,7 +373,7 @@ impl FeatureConfigBuilder {
         Self::default()
     }
 
-    pub fn from_pydict(_dict: &Bound<'_, PyDict>) -> PyResult<Self> {
+    pub fn from_json(_value: &Value) -> Result<Self, ConfigError> {
         Ok(Self::new())
     }
 

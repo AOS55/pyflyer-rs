@@ -1,10 +1,11 @@
+use bevy::prelude::Deref;
 use flyer::components::{
     AircraftAeroCoefficients, AircraftConfig, AircraftGeometry, AircraftType, DubinsAircraftConfig,
     FullAircraftConfig, MassModel,
 };
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-use pyo3::prelude::*;
-use pyo3::types::PyDict;
 use rand_chacha::ChaCha8Rng;
 
 use crate::gym::config::builders::{
@@ -26,6 +27,7 @@ pub trait AircraftBuilder {
     fn build(&self) -> Result<AircraftConfig, ConfigError>;
 }
 
+#[derive(Debug, Clone)]
 pub enum AircraftBuilderEnum {
     Dubins(DubinsAircraftConfigBuilder),
     Full(FullAircraftConfigBuilder),
@@ -40,7 +42,7 @@ impl AircraftBuilder for AircraftBuilderEnum {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct DubinsAircraftConfigBuilder {
     name: Option<String>,
     max_speed: Option<f64>,
@@ -51,16 +53,18 @@ pub struct DubinsAircraftConfigBuilder {
     max_climb_rate: Option<f64>,
     max_descent_rate: Option<f64>,
     random_start_config: RandomStartPosConfigBuilder,
+    #[serde(skip)]
     rng: Option<ChaCha8Rng>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct FullAircraftConfigBuilder {
     pub name: Option<String>,
     pub ac_type: Option<AircraftType>,
     pub mass: Option<MassModel>,
     pub geometry: Option<AircraftGeometry>,
     pub aero_coef: Option<AircraftAeroCoefficients>,
+    #[serde(skip)]
     pub rng: Option<ChaCha8Rng>,
 }
 
@@ -69,36 +73,22 @@ impl DubinsAircraftConfigBuilder {
         Self::default()
     }
 
-    pub fn from_pydict(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
+    pub fn from_json(value: &Value) -> Result<Self, ConfigError> {
         let mut builder = Self::new();
-        builder.name = dict.get_item("name")?.and_then(|v| v.extract().ok());
 
-        if let Ok(Some(config)) = dict.get_item("config") {
-            if let Ok(config_dict) = config.downcast::<PyDict>() {
-                builder.max_speed = config_dict
-                    .get_item("max_speed")?
-                    .and_then(|v| v.extract().ok());
-                builder.min_speed = config_dict
-                    .get_item("min_speed")?
-                    .and_then(|v| v.extract().ok());
-                builder.acceleration = config_dict
-                    .get_item("acceleration")?
-                    .and_then(|v| v.extract().ok());
-                builder.max_bank_angle = config_dict
-                    .get_item("max_bank_angle")?
-                    .and_then(|v| v.extract().ok());
-                builder.max_turn_rate = config_dict
-                    .get_item("max_turn_rate")?
-                    .and_then(|v| v.extract().ok());
-                builder.max_climb_rate = config_dict
-                    .get_item("max_climb_rate")?
-                    .and_then(|v| v.extract().ok());
-                builder.max_descent_rate = config_dict
-                    .get_item("max_descent_rate")?
-                    .and_then(|v| v.extract().ok());
-                builder.random_start_config = RandomStartPosConfigBuilder::from_pydict(dict)?;
-            }
+        builder.name = value.get("name").and_then(|v| v.as_str()).map(String::from);
+
+        if let Some(config) = value.get("config") {
+            builder.max_speed = config.get("max_speed").and_then(|v| v.as_f64());
+            builder.min_speed = config.get("min_speed").and_then(|v| v.as_f64());
+            builder.acceleration = config.get("acceleration").and_then(|v| v.as_f64());
+            builder.max_bank_angle = config.get("max_bank_angle").and_then(|v| v.as_f64());
+            builder.max_turn_rate = config.get("max_turn_rate").and_then(|v| v.as_f64());
+            builder.max_climb_rate = config.get("max_climb_rate").and_then(|v| v.as_f64());
+            builder.max_descent_rate = config.get("max_descent_rate").and_then(|v| v.as_f64());
         }
+
+        builder.random_start_config = RandomStartPosConfigBuilder::from_json(value)?;
 
         Ok(builder)
     }
@@ -136,64 +126,48 @@ impl AircraftBuilder for DubinsAircraftConfigBuilder {
     }
 }
 
-impl WithRng for DubinsAircraftConfigBuilder {
-    fn with_rng(mut self, rng: ChaCha8Rng) -> Self {
-        self.rng = Some(rng);
-        self
-    }
-}
-
 impl FullAircraftConfigBuilder {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn from_pydict(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
+    pub fn from_json(value: &Value) -> Result<Self, ConfigError> {
         let mut builder = Self::new();
-        builder.name = dict
-            .get_item("name")?
-            .and_then(|v| v.extract::<String>().ok());
 
-        if let Ok(Some(config)) = dict.get_item("config") {
-            if let Ok(config_dict) = config.downcast::<PyDict>() {
-                // Aircraft type
-                if let Some(type_str) = config_dict
-                    .get_item("ac_type")?
-                    .and_then(|t| t.extract::<String>().ok())
-                {
-                    builder.ac_type = Some(match type_str.as_str() {
-                        "twin_otter" => AircraftType::TwinOtter,
-                        "f4_phantom" => AircraftType::F4Phantom,
-                        _ => AircraftType::GenericTransport,
-                    });
-                }
+        builder.name = value.get("name").and_then(|v| v.as_str()).map(String::from);
 
-                // Parse mass and geometry configurations
-                if let Ok(Some(mass_dict)) = config_dict.get_item("mass") {
-                    if let Ok(mass_dict) = mass_dict.downcast::<PyDict>() {
-                        builder.mass = parse_mass_dict(&mass_dict)?;
-                    }
-                }
-
-                if let Ok(Some(geom_dict)) = config_dict.get_item("geometry") {
-                    if let Ok(geom_dict) = geom_dict.downcast::<PyDict>() {
-                        builder.geometry = parse_geometry_dict(&geom_dict)?;
-                    }
-                }
-
-                // Handle aero coefficients based on aircraft type
-                builder.aero_coef = Some(
-                    match builder
-                        .ac_type
-                        .as_ref()
-                        .unwrap_or(&AircraftType::GenericTransport)
-                    {
-                        AircraftType::TwinOtter => AircraftAeroCoefficients::twin_otter(),
-                        AircraftType::F4Phantom => AircraftAeroCoefficients::f4_phantom(),
-                        _ => AircraftAeroCoefficients::generic_transport(),
-                    },
-                );
+        if let Some(config) = value.get("config") {
+            // Aircraft type
+            if let Some(type_str) = config.get("ac_type").and_then(|t| t.as_str()) {
+                builder.ac_type = Some(match type_str {
+                    "twin_otter" => AircraftType::TwinOtter,
+                    "f4_phantom" => AircraftType::F4Phantom,
+                    _ => AircraftType::GenericTransport,
+                });
             }
+
+            // Parse mass configuration
+            if let Some(mass_config) = config.get("mass") {
+                builder.mass = parse_mass_json(mass_config)?;
+            }
+
+            // Parse geometry configuration
+            if let Some(geom_config) = config.get("geometry") {
+                builder.geometry = parse_geometry_json(geom_config)?;
+            }
+
+            // Handle aero coefficients based on aircraft type
+            builder.aero_coef = Some(
+                match builder
+                    .ac_type
+                    .as_ref()
+                    .unwrap_or(&AircraftType::GenericTransport)
+                {
+                    AircraftType::TwinOtter => AircraftAeroCoefficients::twin_otter(),
+                    AircraftType::F4Phantom => AircraftAeroCoefficients::f4_phantom(),
+                    _ => AircraftAeroCoefficients::generic_transport(),
+                },
+            );
         }
 
         Ok(builder)
@@ -217,7 +191,7 @@ impl AircraftBuilder for FullAircraftConfigBuilder {
             )
         });
 
-        let config = FullAircraftConfig {
+        Ok(AircraftConfig::Full(FullAircraftConfig {
             name,
             ac_type: ac_type.clone(),
             mass: self.mass.clone().unwrap_or_else(|| match ac_type {
@@ -235,9 +209,43 @@ impl AircraftBuilder for FullAircraftConfigBuilder {
                 AircraftType::F4Phantom => AircraftAeroCoefficients::f4_phantom(),
                 _ => AircraftAeroCoefficients::generic_transport(),
             }),
-        };
+        }))
+    }
+}
 
-        Ok(AircraftConfig::Full(config))
+// Helper functions to parse configuration
+fn parse_mass_json(value: &Value) -> Result<Option<MassModel>, ConfigError> {
+    let mass = value.get("mass").and_then(|v| v.as_f64());
+    let ixx = value.get("ixx").and_then(|v| v.as_f64());
+    let iyy = value.get("iyy").and_then(|v| v.as_f64());
+    let izz = value.get("izz").and_then(|v| v.as_f64());
+    let ixz = value.get("ixz").and_then(|v| v.as_f64());
+
+    match (mass, ixx, iyy, izz, ixz) {
+        (Some(mass), Some(ixx), Some(iyy), Some(izz), Some(ixz)) => {
+            Ok(Some(MassModel::new(mass, ixx, iyy, izz, ixz)))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn parse_geometry_json(value: &Value) -> Result<Option<AircraftGeometry>, ConfigError> {
+    let wing_area = value.get("wing_area").and_then(|v| v.as_f64());
+    let wing_span = value.get("wing_span").and_then(|v| v.as_f64());
+    let mac = value.get("mac").and_then(|v| v.as_f64());
+
+    match (wing_area, wing_span, mac) {
+        (Some(wing_area), Some(wing_span), Some(mac)) => {
+            Ok(Some(AircraftGeometry::new(wing_area, wing_span, mac)))
+        }
+        _ => Ok(None),
+    }
+}
+
+impl WithRng for DubinsAircraftConfigBuilder {
+    fn with_rng(mut self, rng: ChaCha8Rng) -> Self {
+        self.rng = Some(rng);
+        self
     }
 }
 
@@ -259,124 +267,63 @@ impl WithRng for AircraftBuilderEnum {
     }
 }
 
-// Helper functions to parse configuration
-fn parse_mass_dict(mass_dict: &Bound<'_, PyDict>) -> PyResult<Option<MassModel>> {
-    let mass = mass_dict.get_item("mass")?.and_then(|v| v.extract().ok());
-    let ixx = mass_dict.get_item("ixx")?.and_then(|v| v.extract().ok());
-    let iyy = mass_dict.get_item("iyy")?.and_then(|v| v.extract().ok());
-    let izz = mass_dict.get_item("izz")?.and_then(|v| v.extract().ok());
-    let ixz = mass_dict.get_item("ixz")?.and_then(|v| v.extract().ok());
+pub fn create_aircraft_builder(value: &Value) -> Result<AircraftAgentBuilder, ConfigError> {
+    let aircraft_type = value
+        .get("type")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ConfigError::MissingRequired("aircraft type".into()))?;
 
-    match (mass, ixx, iyy, izz, ixz) {
-        (Some(mass), Some(ixx), Some(iyy), Some(izz), Some(ixz)) => {
-            Ok(Some(MassModel::new(mass, ixx, iyy, izz, ixz)))
-        }
-        _ => Ok(None),
-    }
-}
+    let action_type = value
+        .get("action_type")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ConfigError::MissingRequired("action type".into()))?;
 
-fn parse_geometry_dict(geom_dict: &Bound<'_, PyDict>) -> PyResult<Option<AircraftGeometry>> {
-    let wing_area = geom_dict
-        .get_item("wing_area")?
-        .and_then(|v| v.extract().ok());
-    let wing_span = geom_dict
-        .get_item("wing_span")?
-        .and_then(|v| v.extract().ok());
-    let mac = geom_dict.get_item("mac")?.and_then(|v| v.extract().ok());
+    let observation_type = value
+        .get("observation_type")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ConfigError::MissingRequired("observation type".into()))?;
 
-    match (wing_area, wing_span, mac) {
-        (Some(wing_area), Some(wing_span), Some(mac)) => {
-            Ok(Some(AircraftGeometry::new(wing_area, wing_span, mac)))
-        }
-        _ => Ok(None),
-    }
-}
-
-// fn get_default_full_config(ac_type: &AircraftType, name: Option<String>) -> FullAircraftConfig {
-//     match ac_type {
-//         AircraftType::TwinOtter => FullAircraftConfig {
-//             name: name.unwrap_or_else(|| "unnamed_twin_otter".to_string()),
-//             ac_type: AircraftType::TwinOtter,
-//             mass: MassModel::twin_otter(),
-//             geometry: AircraftGeometry::twin_otter(),
-//             aero_coef: AircraftAeroCoefficients::twin_otter(),
-//         },
-//         AircraftType::F4Phantom => FullAircraftConfig {
-//             name: name.unwrap_or_else(|| "unnamed_f4".to_string()),
-//             ac_type: AircraftType::F4Phantom,
-//             mass: MassModel::f4_phantom(),
-//             geometry: AircraftGeometry::f4_phantom(),
-//             aero_coef: AircraftAeroCoefficients::f4_phantom(),
-//         },
-//         _ => FullAircraftConfig {
-//             name: name.unwrap_or_else(|| "unnamed_generic".to_string()),
-//             ac_type: AircraftType::GenericTransport,
-//             mass: MassModel::generic_transport(),
-//             geometry: AircraftGeometry::generic_transport(),
-//             aero_coef: AircraftAeroCoefficients::generic_transport(),
-//         },
-//     }
-// }
-
-pub fn create_aircraft_builder(
-    dict: &Bound<'_, PyDict>,
-) -> Result<AircraftAgentBuilder, ConfigError> {
-    let aircraft_type: String = dict
-        .get_item("type")
-        .map_err(|_| ConfigError::MissingRequired("aircraft type".into()))?
-        .ok_or_else(|| ConfigError::MissingRequired("aircraft type".into()))?
-        .extract()?;
-
-    let action_type: String = dict
-        .get_item("action_type")
-        .map_err(|_| ConfigError::MissingRequired("action type".into()))?
-        .ok_or_else(|| ConfigError::MissingRequired("action type".into()))?
-        .extract()?;
-
-    let observation_type: String = dict
-        .get_item("observation_type")
-        .map_err(|_| ConfigError::MissingRequired("observation type".into()))?
-        .ok_or_else(|| ConfigError::MissingRequired("observation type".into()))?
-        .extract()?;
-
-    let aircraft_builder = match aircraft_type.as_str() {
+    let aircraft_builder = match aircraft_type {
         "dubins" => {
-            let builder = DubinsAircraftConfigBuilder::from_pydict(dict)?;
+            let builder = DubinsAircraftConfigBuilder::from_json(value)?;
             AircraftBuilderEnum::Dubins(builder)
         }
         "full" => {
-            let builder = FullAircraftConfigBuilder::from_pydict(dict)?;
+            let builder = FullAircraftConfigBuilder::from_json(value)?;
             AircraftBuilderEnum::Full(builder)
         }
-        _ => return Err(ConfigError::InvalidAircraftType(aircraft_type)),
+        _ => return Err(ConfigError::InvalidAircraftType(aircraft_type.to_string())),
     };
 
-    let action_builder = match action_type.as_str() {
-        "Continuous" => match aircraft_type.as_str() {
+    let action_builder = match action_type {
+        "Continuous" => match aircraft_type {
             "dubins" => ActionSpaceBuilder::new().act_space(ActionSpace::new_continuous_dubins()),
             "full" => ActionSpaceBuilder::new().act_space(ActionSpace::new_continuous_full()),
-            _ => return Err(ConfigError::InvalidActionType(action_type)),
+            _ => return Err(ConfigError::InvalidActionType(action_type.to_string())),
         },
-        "Discrete" => match aircraft_type.as_str() {
+        "Discrete" => match aircraft_type {
             "dubins" => ActionSpaceBuilder::new().act_space(ActionSpace::new_discrete_dubins()),
             "full" => ActionSpaceBuilder::new().act_space(ActionSpace::new_discrete_full()),
-            _ => return Err(ConfigError::InvalidAircraftType(action_type)),
+            _ => return Err(ConfigError::InvalidActionType(action_type.to_string())),
         },
-        _ => return Err(ConfigError::InvalidActionType(action_type)),
+        _ => return Err(ConfigError::InvalidActionType(action_type.to_string())),
     };
 
-    let observation_builder = match observation_type.as_str() {
-        "Continuous" => match aircraft_type.as_str() {
+    let observation_builder = match observation_type {
+        "Continuous" => match aircraft_type {
             "dubins" => ObservationSpaceBuilder::new().obs_space(ObservationSpace::Continuous(
                 ContinuousObservationSpace::DubinsAircraft,
             )),
             "full" => ObservationSpaceBuilder::new().obs_space(ObservationSpace::Continuous(
                 ContinuousObservationSpace::FullAircraft,
             )),
-            _ => return Err(ConfigError::InvalidAircraftType(aircraft_type)),
+            _ => return Err(ConfigError::InvalidAircraftType(aircraft_type.to_string())),
         },
-        // Add more observation types as needed
-        _ => return Err(ConfigError::InvalidObservationType(observation_type)),
+        _ => {
+            return Err(ConfigError::InvalidObservationType(
+                observation_type.to_string(),
+            ))
+        }
     };
 
     Ok(AircraftAgentBuilder {

@@ -1,6 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::gym::config::ConfigError;
 use crate::gym::ActionSpace;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionSpaceBuilder {
     act_space: Option<ActionSpace>,
 }

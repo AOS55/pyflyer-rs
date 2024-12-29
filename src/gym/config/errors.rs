@@ -10,6 +10,7 @@ pub enum ConfigError {
     MissingRequired(String),
     ValidationError(String),
     PythonError(String),
+    JsonError(String),
     InvalidObservationType(String),
     MissingObservationSpace,
     InvalidActionType(String),
@@ -27,6 +28,7 @@ impl fmt::Display for ConfigError {
             ConfigError::MissingRequired(name) => write!(f, "Missing required parameter: {}", name),
             ConfigError::ValidationError(msg) => write!(f, "Validation error: {}", msg),
             ConfigError::PythonError(msg) => write!(f, "Python error: {}", msg),
+            ConfigError::JsonError(msg) => write!(f, "JSON error: {}", msg),
             ConfigError::InvalidObservationType(msg) => {
                 write!(f, "Invalid observation type: {}", msg)
             }
@@ -38,6 +40,8 @@ impl fmt::Display for ConfigError {
         }
     }
 }
+
+impl std::error::Error for ConfigError {}
 
 impl From<ConfigError> for PyErr {
     fn from(err: ConfigError) -> PyErr {

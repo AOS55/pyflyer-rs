@@ -1,10 +1,10 @@
 use flyer::resources::PhysicsConfig;
-use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::gym::config::errors::ConfigError;
 
-#[derive(Default)]
+#[derive(Default, Debug, Serialize, Clone, Deserialize)]
 pub struct PhysicsConfigBuilder {
     pub max_velocity: Option<f64>,
     pub max_angular_velocity: Option<f64>,
@@ -31,17 +31,21 @@ impl PhysicsConfigBuilder {
         self
     }
 
-    pub fn from_pydict(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
+    pub fn from_json(value: &Value) -> Result<Self, ConfigError> {
         let mut builder = Self::new();
 
-        if let Some(max_velocity) = dict.get_item("max_velocity")? {
-            builder = builder.max_velocity(max_velocity.extract()?);
+        if let Some(max_velocity) = value.get("max_velocity").and_then(|v| v.as_f64()) {
+            builder = builder.max_velocity(max_velocity);
         }
-        if let Some(max_angular_velocity) = dict.get_item("max_angular_velocity")? {
-            builder = builder.max_angular_velocity(max_angular_velocity.extract()?);
+
+        if let Some(max_angular_velocity) =
+            value.get("max_angular_velocity").and_then(|v| v.as_f64())
+        {
+            builder = builder.max_angular_velocity(max_angular_velocity);
         }
-        if let Some(timestep) = dict.get_item("timestep")? {
-            builder = builder.timestep(timestep.extract()?);
+
+        if let Some(timestep) = value.get("timestep").and_then(|v| v.as_f64()) {
+            builder = builder.timestep(timestep);
         }
 
         Ok(builder)

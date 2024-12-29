@@ -1,24 +1,19 @@
 use flyer::components::AircraftState;
-use numpy::PyArray1;
-use pyo3::prelude::*;
+use serde::{Deserialize, Serialize};
 
-pub trait FromAircraft {
-    fn from_aircraft<'py>(
-        &self,
-        py: Python<'py>,
-        state: &AircraftState,
-    ) -> PyResult<Bound<'py, PyAny>>;
+pub trait ToObservation {
+    fn to_observation(&self, state: &AircraftState) -> Vec<f64>;
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Copy, Debug, Clone, Serialize, Deserialize)]
+pub enum ObservationSpace {
+    Continuous(ContinuousObservationSpace),
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum ContinuousObservationSpace {
     DubinsAircraft,
     FullAircraft,
-}
-
-#[derive(Copy, Debug, Clone)]
-pub enum ObservationSpace {
-    Continuous(ContinuousObservationSpace),
 }
 
 impl Default for ObservationSpace {
@@ -27,24 +22,16 @@ impl Default for ObservationSpace {
     }
 }
 
-impl FromAircraft for ObservationSpace {
-    fn from_aircraft<'py>(
-        &self,
-        py: Python<'py>,
-        state: &AircraftState,
-    ) -> PyResult<Bound<'py, PyAny>> {
+impl ToObservation for ObservationSpace {
+    fn to_observation(&self, state: &AircraftState) -> Vec<f64> {
         match self {
-            ObservationSpace::Continuous(continuous) => continuous.from_aircraft(py, state),
+            ObservationSpace::Continuous(continuous) => continuous.to_observation(state),
         }
     }
 }
 
-impl FromAircraft for ContinuousObservationSpace {
-    fn from_aircraft<'py>(
-        &self,
-        py: Python<'py>,
-        state: &AircraftState,
-    ) -> PyResult<Bound<'py, PyAny>> {
+impl ToObservation for ContinuousObservationSpace {
+    fn to_observation(&self, state: &AircraftState) -> Vec<f64> {
         match (self, state) {
             (ContinuousObservationSpace::DubinsAircraft, AircraftState::Dubins(dubins_state)) => {
                 // Convert DubinsAircraftState to simplified observation vector
@@ -63,8 +50,7 @@ impl FromAircraft for ContinuousObservationSpace {
                 obs.extend_from_slice(&[heading, altitude, airspeed]);
 
                 // Convert to numpy array
-                let array = PyArray1::from_vec(py, obs);
-                Ok(array.into_any())
+                obs
             }
             (ContinuousObservationSpace::FullAircraft, AircraftState::Full(full_state)) => {
                 // Convert FullAircraftState to simplified observation vector for RL
@@ -83,12 +69,9 @@ impl FromAircraft for ContinuousObservationSpace {
                 obs.push(full_state.air_data.beta); // sideslip angle
 
                 // Convert to numpy array
-                let array = PyArray1::from_vec(py, obs);
-                Ok(array.into_any())
+                obs
             }
-            _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "Observation space type does not match aircraft state type",
-            )),
+            _ => Vec::new(), // Return empty vector for mismatched types
         }
     }
 }

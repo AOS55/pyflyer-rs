@@ -1,18 +1,17 @@
 use flyer::components::{AircraftControlSurfaces, AircraftControls, DubinsAircraftControls};
-use numpy::PyReadonlyArray1;
-use pyo3::prelude::*;
+use serde::{Deserialize, Serialize};
 
 pub trait ToControls {
-    fn to_controls<'py>(&self, py: Python<'py>, action: PyReadonlyArray1<f64>) -> AircraftControls;
+    fn to_controls(&self, action: Vec<f64>) -> AircraftControls;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ActionSpace {
     Continuous(ContinuousActionSpace),
     Discrete(DiscreteActionSpace),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ContinuousActionSpace {
     DubinsAircraft {
         // Maps normalized actions [-1, 1] to actual control ranges
@@ -27,7 +26,7 @@ pub enum ContinuousActionSpace {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DiscreteActionSpace {
     DubinsAircraft {
         acceleration_levels: Vec<f64>,
@@ -76,39 +75,34 @@ impl ActionSpace {
 }
 
 impl ToControls for ActionSpace {
-    fn to_controls<'py>(&self, py: Python<'py>, action: PyReadonlyArray1<f64>) -> AircraftControls {
+    fn to_controls(&self, action: Vec<f64>) -> AircraftControls {
         match self {
-            ActionSpace::Continuous(continuous) => continuous.to_controls(py, action),
-            ActionSpace::Discrete(discrete) => discrete.to_controls(py, action),
+            ActionSpace::Continuous(continuous) => continuous.to_controls(action),
+            ActionSpace::Discrete(discrete) => discrete.to_controls(action),
         }
     }
 }
 
 impl ToControls for ContinuousActionSpace {
-    fn to_controls<'py>(
-        &self,
-        _py: Python<'py>,
-        action: PyReadonlyArray1<f64>,
-    ) -> AircraftControls {
-        let array = action.as_array();
+    fn to_controls<'py>(&self, action: Vec<f64>) -> AircraftControls {
         match self {
             ContinuousActionSpace::DubinsAircraft {
                 max_acceleration,
                 max_bank_angle,
                 max_vertical_speed,
             } => AircraftControls::Dubins(DubinsAircraftControls {
-                acceleration: array[0] * max_acceleration,
-                bank_angle: array[1] * max_bank_angle,
-                vertical_speed: array[2] * max_vertical_speed,
+                acceleration: action[0] * max_acceleration,
+                bank_angle: action[1] * max_bank_angle,
+                vertical_speed: action[2] * max_vertical_speed,
             }),
             ContinuousActionSpace::FullAircraft {
                 max_elevator,
                 max_aileron,
                 max_rudder,
             } => AircraftControls::Full(AircraftControlSurfaces {
-                elevator: array[0] * max_elevator,
-                aileron: array[1] * max_aileron,
-                rudder: array[2] * max_rudder,
+                elevator: action[0] * max_elevator,
+                aileron: action[1] * max_aileron,
+                rudder: action[2] * max_rudder,
                 flaps: 0.0, // Not controlled in basic implementation
             }),
         }
@@ -116,13 +110,8 @@ impl ToControls for ContinuousActionSpace {
 }
 
 impl ToControls for DiscreteActionSpace {
-    fn to_controls<'py>(
-        &self,
-        _py: Python<'py>,
-        action: PyReadonlyArray1<f64>,
-    ) -> AircraftControls {
-        let array = action.as_array();
-        let idx = array[0] as usize;
+    fn to_controls<'py>(&self, action: Vec<f64>) -> AircraftControls {
+        let idx = action[0] as usize;
 
         match self {
             DiscreteActionSpace::DubinsAircraft {

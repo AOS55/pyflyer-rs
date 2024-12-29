@@ -1,9 +1,11 @@
 use flyer::resources::RewardWeights;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use serde::{Deserialize, Serialize};
 
 use crate::gym::config::ConfigError;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RewardWeightsBuilder;
 
 impl Default for RewardWeightsBuilder {

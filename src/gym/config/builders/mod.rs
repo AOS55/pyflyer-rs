@@ -1,8 +1,8 @@
 use flyer::components::AircraftConfig;
 use flyer::resources::{AgentConfig, UpdateMode};
-use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
 use rand;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 
 mod aircraft;
@@ -28,18 +28,27 @@ use start::RandomStartPosConfigBuilder;
 use termination::TerminalConditionsBuilder;
 use terrain::TerrainConfigBuilder;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnvConfigBuilder {
+    #[serde(skip)]
     rng_manager: Option<RngManager>,
     max_episode_steps: Option<u32>,
     steps_per_action: Option<usize>,
     time_step: Option<f64>,
+    #[serde(skip)]
     aircraft_builders: HashMap<String, AircraftBuilderEnum>,
+    #[serde(skip)]
     action_builders: HashMap<String, ActionSpaceBuilder>,
+    #[serde(skip)]
     observation_builders: HashMap<String, ObservationSpaceBuilder>,
+    #[serde(skip)]
     physics_builder: PhysicsConfigBuilder,
     // environment_builder: EnvironmentConfigBuilder,
+    #[serde(skip)]
     terrain_builder: TerrainConfigBuilder,
+    #[serde(skip)]
     reward_builder: RewardWeightsBuilder,
+    #[serde(skip)]
     terminal_builder: TerminalConditionsBuilder,
 }
 
@@ -82,73 +91,68 @@ impl EnvConfigBuilder {
         self
     }
 
-    // pub fn physics_config(mut self, builder: PhysicsConfigBuilder) -> Self {
-    //     self.physics_builder = builder;
-    //     self
-    // }
-
     pub fn terrain_config(mut self, builder: TerrainConfigBuilder) -> Self {
         self.terrain_builder = builder;
         self
     }
 
-    pub fn from_pydict(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
+    pub fn from_json(json_value: &Value) -> Result<Self, ConfigError> {
         let mut builder = Self::new();
 
-        // Use the seed if passed, otherwise generate a random new one
-        let seed = if let Some(seed) = dict.get_item("seed")? {
-            seed.extract()?
-        } else {
-            rand::random()
-        };
+        // Parse seed
+        let seed = json_value
+            .get("seed")
+            .and_then(|v| v.as_u64())
+            .unwrap_or_else(rand::random);
+
         let rng_manager = RngManager::new(seed);
         builder.rng_manager = Some(rng_manager.clone());
 
-        // Set the max episode steps, steps per action, and time step if passed
-        if let Some(steps) = dict.get_item("max_episode_steps")? {
-            builder = builder.max_episode_steps(steps.extract()?);
+        // Parse basic configuration
+        if let Some(steps) = json_value.get("max_episode_steps").and_then(|v| v.as_u64()) {
+            builder = builder.max_episode_steps(steps as u32);
         }
-        if let Some(steps) = dict.get_item("steps_per_action")? {
-            builder = builder.steps_per_action(steps.extract()?);
+        if let Some(steps) = json_value.get("steps_per_action").and_then(|v| v.as_u64()) {
+            builder = builder.steps_per_action(steps as usize);
         }
-        if let Some(dt) = dict.get_item("time_step")? {
-            builder = builder.time_step(dt.extract()?);
+        if let Some(dt) = json_value.get("time_step").and_then(|v| v.as_f64()) {
+            builder = builder.time_step(dt);
         }
 
-        // Get the aircraft from the list of aircraft types
-        if let Some(aircraft_list) = dict.get_item("aircraft_config")? {
-            if let Ok(aircraft_configs) = aircraft_list.downcast::<PyList>() {
-                for (i, aircraft_dict) in aircraft_configs.iter().enumerate() {
-                    if let Ok(config_dict) = aircraft_dict.downcast::<PyDict>() {
-                        let aircraft_agent = create_aircraft_builder(&config_dict)?;
-                        let id = format!("aircraft_{}", i);
+        // Parse aircraft configurations
+        if let Some(aircraft_configs) = json_value.get("aircraft_config").and_then(|v| v.as_array())
+        {
+            for (i, config) in aircraft_configs.iter().enumerate() {
+                let aircraft_agent = create_aircraft_builder(config)?;
+                let id = format!("aircraft_{}", i);
 
-                        builder.aircraft_builders.insert(
-                            id.clone(),
-                            aircraft_agent
-                                .aircraft_builder
-                                .with_rng(rng_manager.get_rng(&id)),
-                        );
+                // Initialize each aircraft with its own RNG stream
+                builder.aircraft_builders.insert(
+                    id.clone(),
+                    aircraft_agent
+                        .aircraft_builder
+                        .with_rng(rng_manager.get_rng(&id)),
+                );
 
-                        builder
-                            .action_builders
-                            .insert(id.clone(), aircraft_agent.action_builder);
+                builder
+                    .action_builders
+                    .insert(id.clone(), aircraft_agent.action_builder);
 
-                        builder
-                            .observation_builders
-                            .insert(id.clone(), aircraft_agent.observation_builder);
-                    }
-                }
+                builder
+                    .observation_builders
+                    .insert(id.clone(), aircraft_agent.observation_builder);
             }
         }
 
-        // Get the terrain configuration
-        if let Some(terrain_dict) = dict.get_item("terrain_config")? {
-            if let Ok(dict) = terrain_dict.downcast::<PyDict>() {
-                let mut config = TerrainConfigBuilder::from_pydict(&dict)?;
-                config.seed = seed;
-                builder = builder.terrain_config(config);
-            }
+        // Parse terrain configuration
+        if let Some(terrain_config) = json_value.get("terrain_config") {
+            let mut config = TerrainConfigBuilder::from_json(terrain_config)?;
+            config.seed = seed;
+            builder = builder.terrain_config(config);
+        }
+
+        if let Some(physics_config) = json_value.get("physics_config") {
+            builder.physics_builder = PhysicsConfigBuilder::from_json(physics_config)?;
         }
 
         Ok(builder)
