@@ -14,27 +14,42 @@ use std::{
 
 use pyflyer::gym::{setup_app, ActionSpace, ConfigError, EnvConfig, ToControls, ToObservation};
 
+/// Enum representing commands sent to the server.
 #[derive(Debug, Serialize, Deserialize)]
 enum Command {
+    /// Initialize the environment with a configuration.
     Initialize { config: serde_json::Value },
+    /// Perform a simulation step with provided actions.
     Step { actions: HashMap<String, Vec<f64>> },
+    /// Reset the environment with an optional random seed.
     Reset { seed: Option<u64> },
+    /// Close the server connection.
     Close,
 }
 
+/// Struct representing the response from the server after handling a command.
 #[derive(Debug, Serialize, Deserialize)]
 struct Response {
+    /// Observation data from the environment.
     obs: Vec<f64>,
+    /// Reward for the current step.
     reward: f64,
+    /// Whether the episode is terminated.
     terminated: bool,
+    /// Whether the episode is truncated.
     truncated: bool,
+    /// Additional info about the step or environment state.
     info: serde_json::Value,
 }
 
+/// Resource representing the server state.
 #[derive(Resource)]
 struct ServerState {
+    /// Connection to the client.
     conn: Arc<Mutex<TcpStream>>,
+    /// Whether the server is initialized.
     initialized: bool,
+    /// Configuration of the environment.
     config: EnvConfig,
 }
 
@@ -56,12 +71,21 @@ struct ServerState {
 //     }
 // }
 
+/// Function to generate an ID object from an aircraft string ID.
+///
+/// # Arguments
+/// * `aircraft_id` - A string representing the aircraft ID.
+///
+/// # Returns
+/// * `Id` - The ID corresponding to the string ID.
 fn get_numeric_id(aircraft_id: &str) -> Id {
-    // The aircraft ID is already in the correct format from the config builder
-    // e.g. "aircraft_0", "aircraft_1", etc.
     Id::Named(aircraft_id.to_string())
 }
 
+/// The main function initializes the server and starts the Bevy app.
+///
+/// # Returns
+/// * `Result<(), Box<dyn std::error::Error>>` - Ok if the server starts successfully, an error otherwise.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting Bevy server...");
 
@@ -112,7 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         config: env_config.clone(),
     });
 
-    // Get asset directorys in correct location
+    // Configure asset directory
     let current_dir = env::current_dir().unwrap();
     let asset_path = current_dir
         .join("pyflyer-rs/flyer-rs/assets")
@@ -122,11 +146,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     app = setup_app(app, env_config.clone(), asset_path);
 
-    // Add command handling system
+    // Add systems for handling commands
     app.add_systems(Update, handle_commands);
     // app.add_systems(Update, handle_stepping);
 
-    // Set server state to initilized
+    // Mark the server state as initialized
     app.world_mut()
         .get_resource_mut::<ServerState>()
         .unwrap()
@@ -139,6 +163,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Function to receive the initial configuration from the client.
+///
+/// # Arguments
+/// * `stream` - The stream to receive data from.
+///
+/// # Returns
+/// * `Result<serde_json::Value, std::io::Error>` - The configuration data or an error.
 fn receive_initial_config(stream: &Arc<Mutex<TcpStream>>) -> std::io::Result<serde_json::Value> {
     println!("Attempting to receive initial config...");
     let guard = match stream.lock() {
@@ -200,6 +231,12 @@ fn receive_initial_config(stream: &Arc<Mutex<TcpStream>>) -> std::io::Result<ser
     }
 }
 
+/// System to handle commands received from the client.
+///
+/// # Arguments
+/// * `server` - The server state resource.
+/// * `update_control` - The update control resource.
+/// * `agent_state` - The agent state resource.
 fn handle_commands(
     mut server: ResMut<ServerState>,
     mut update_control: ResMut<UpdateControl>,
@@ -207,8 +244,11 @@ fn handle_commands(
 ) {
     if !server.initialized {
         // Ignore commands until initialized
+        println!("Server not initialized yet, ignoring command");
         return;
     }
+
+    println!("Handle commands called");
 
     let cmd = {
         let guard = server.conn.lock().unwrap();
@@ -218,7 +258,17 @@ fn handle_commands(
         let mut line = String::new();
 
         if reader.read_line(&mut line).is_ok() && !line.is_empty() {
-            serde_json::from_str::<Command>(&line).ok()
+            println!("Received command: {}", line.trim());
+            match serde_json::from_str::<Command>(&line) {
+                Ok(cmd) => {
+                    println!("Parsed command: {:?}", cmd); // Show parsed command
+                    Some(cmd)
+                }
+                Err(e) => {
+                    println!("Failed to parse command: {}", e);
+                    None
+                }
+            }
         } else {
             None
         }
@@ -226,11 +276,14 @@ fn handle_commands(
 
     // Non-blocking read
     if let Some(cmd) = cmd {
+        println!("Processing command: {:?}", cmd);
         match cmd {
             Command::Initialize { .. } => {
                 // Ignore after initial setup
             }
             Command::Step { actions } => {
+                // TODO: Consider using std::sync::condvar here
+
                 // Process actions for each aircaft and add to queue
                 if let Ok(mut action_queue) = agent_state.action_queue.lock() {
                     for (aircraft_id, action) in actions {
@@ -299,7 +352,63 @@ fn handle_commands(
                 }
             }
             Command::Reset { seed } => {
-                // Handle reset command
+                println!("Handling Reset command");
+
+                // Clear action queue
+                if let Ok(mut action_queue) = agent_state.action_queue.lock() {
+                    action_queue.clear();
+                }
+
+                update_control.remaining_steps = server.config.steps_per_action;
+                while update_control.remaining_steps > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+
+                // Create response with proper error handling
+                let result = match (server.conn.lock(), agent_state.state_buffer.lock()) {
+                    (Ok(guard), Ok(state_buffer)) => {
+                        if let Ok(mut stream) = guard.try_clone() {
+                            let mut all_observations = Vec::new();
+
+                            for (id, state) in state_buffer.iter() {
+                                let id_str = match id {
+                                    Id::Named(name) => name.clone(),
+                                    Id::Entity(entity) => entity.to_string(),
+                                };
+
+                                if let Some(obs_space) =
+                                    server.config.observation_spaces.get(&id_str)
+                                {
+                                    let obs = obs_space.to_observation(state);
+                                    all_observations.extend(obs);
+                                } else {
+                                    warn!("Observation space not found for aircraft: {:?}", id);
+                                }
+                            }
+
+                            let response = Response {
+                                obs: all_observations,
+                                reward: 0.0,
+                                terminated: false,
+                                truncated: false,
+                                info: serde_json::json!({}),
+                            };
+
+                            // Log response for debugging
+                            println!("Sending reset response: {:?}", response);
+                            let response = "test";
+
+                            if let Err(e) =
+                                writeln!(stream, "{}", serde_json::to_string(&response).unwrap())
+                            {
+                                error!("Failed to write response: {}", e);
+                            }
+                        }
+                    }
+                    (Err(e1), _) => error!("Failed to lock connection: {}", e1),
+                    (_, Err(e2)) => error!("Failed to lock state buffer: {}", e2),
+                };
+                result
             }
             Command::Close => {
                 // Handle close command
