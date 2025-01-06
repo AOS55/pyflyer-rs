@@ -1,8 +1,9 @@
 use flyer::components::AircraftState;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 pub trait ToObservation {
-    fn to_observation(&self, state: &AircraftState) -> Vec<f64>;
+    fn to_observation(&self, state: &AircraftState) -> HashMap<String, f64>;
 }
 
 #[derive(Copy, Debug, Clone, Serialize, Deserialize)]
@@ -23,7 +24,7 @@ impl Default for ObservationSpace {
 }
 
 impl ToObservation for ObservationSpace {
-    fn to_observation(&self, state: &AircraftState) -> Vec<f64> {
+    fn to_observation(&self, state: &AircraftState) -> HashMap<String, f64> {
         match self {
             ObservationSpace::Continuous(continuous) => continuous.to_observation(state),
         }
@@ -31,11 +32,11 @@ impl ToObservation for ObservationSpace {
 }
 
 impl ToObservation for ContinuousObservationSpace {
-    fn to_observation(&self, state: &AircraftState) -> Vec<f64> {
+    fn to_observation(&self, state: &AircraftState) -> HashMap<String, f64> {
         match (self, state) {
             (ContinuousObservationSpace::DubinsAircraft, AircraftState::Dubins(dubins_state)) => {
                 // Convert DubinsAircraftState to simplified observation vector
-                let mut obs = Vec::with_capacity(3);
+                let mut obs = HashMap::new();
 
                 // Get heading from attitude quaternion (yaw angle)
                 let euler = dubins_state.spatial.attitude.euler_angles();
@@ -47,31 +48,39 @@ impl ToObservation for ContinuousObservationSpace {
                 // Airspeed from velocity magnitude
                 let airspeed = dubins_state.spatial.velocity.magnitude();
 
-                obs.extend_from_slice(&[heading, altitude, airspeed]);
+                let x = dubins_state.spatial.position.x;
+                let y = dubins_state.spatial.position.y;
 
-                // Convert to numpy array
+                obs.insert("x".to_string(), x);
+                obs.insert("y".to_string(), y);
+                obs.insert("heading".to_string(), heading);
+                obs.insert("altitude".to_string(), altitude);
+                obs.insert("airspeed".to_string(), airspeed);
+
                 obs
             }
             (ContinuousObservationSpace::FullAircraft, AircraftState::Full(full_state)) => {
                 // Convert FullAircraftState to simplified observation vector for RL
-                let mut obs = Vec::with_capacity(9);
+                let mut obs = HashMap::new();
 
                 // Attitude (roll, pitch, yaw)
                 let euler = full_state.spatial.attitude.euler_angles();
-                obs.extend_from_slice(&[euler.0, euler.1, euler.2]); // roll, pitch, yaw
+                obs.insert("roll".to_string(), euler.0);
+                obs.insert("pitch".to_string(), euler.1);
+                obs.insert("yaw".to_string(), euler.2);
 
                 // Angular rates (p, q, r)
-                obs.extend_from_slice(&full_state.spatial.angular_velocity.as_slice());
+                obs.insert("p".to_string(), full_state.spatial.angular_velocity.x);
+                obs.insert("q".to_string(), full_state.spatial.angular_velocity.y);
+                obs.insert("r".to_string(), full_state.spatial.angular_velocity.z);
 
                 // Key flight parameters
-                obs.push(full_state.air_data.true_airspeed); // airspeed
-                obs.push(full_state.air_data.alpha); // angle of attack
-                obs.push(full_state.air_data.beta); // sideslip angle
-
-                // Convert to numpy array
+                obs.insert("TAS".to_string(), full_state.air_data.true_airspeed);
+                obs.insert("alpha".to_string(), full_state.air_data.alpha);
+                obs.insert("beta".to_string(), full_state.air_data.beta);
                 obs
             }
-            _ => Vec::new(), // Return empty vector for mismatched types
+            _ => HashMap::new(), // Return empty vector for mismatched types
         }
     }
 }
