@@ -1,7 +1,7 @@
-use bevy::{prelude::*, window::PrimaryWindow};
+use bevy::prelude::*;
 use flyer::{
     plugins::Id,
-    resources::{AgentState, StepCommand, UpdateControl},
+    resources::{AgentState, UpdateControl},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -12,7 +12,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use pyflyer::gym::{setup_app, ActionSpace, ConfigError, EnvConfig, ToControls, ToObservation};
+use pyflyer::gym::{setup_app, EnvConfig, ToControls, ToObservation};
 
 /// Enum representing commands sent to the server.
 #[derive(Debug, Serialize, Deserialize)]
@@ -240,7 +240,6 @@ fn handle_step_request(
     mut update_control: ResMut<UpdateControl>,
     agent_state: ResMut<AgentState>,
 ) {
-    info!("Handling Step request");
     for request in step_requests.read() {
         if let Ok(mut action_queue) = agent_state.action_queue.lock() {
             // Apply actions
@@ -259,32 +258,23 @@ fn handle_step_request(
 }
 
 fn check_step_completion(
-    update_control: Res<UpdateControl>,
     agent_state: Res<AgentState>,
     mut step_complete: EventWriter<StepCompleteEvent>,
     server: Res<ServerState>,
 ) {
-    info!(
-        "Checking step completion, remaining_steps: {}",
-        update_control.remaining_steps
-    );
-
     if let Ok(state_buffer) = agent_state.state_buffer.lock() {
         // Add check for empty state buffer
         if state_buffer.is_empty() {
-            info!("State buffer empty, waiting for physics update");
+            warn!("State buffer empty, waiting for physics update");
             return;
         }
 
         let mut all_observations = HashMap::new();
-        info!("state_buffer loop");
         for (id, state) in state_buffer.iter() {
             let id_str = match id {
                 Id::Named(name) => name.clone(),
                 Id::Entity(entity) => entity.to_string(),
             };
-
-            info!("Step Completion id: {}, state: {:?}", id_str, state);
 
             if let Some(obs_space) = server.config.observation_spaces.get(&id_str) {
                 let obs = obs_space.to_observation(state);
@@ -294,7 +284,6 @@ fn check_step_completion(
 
         // Only send event if we have observations
         if !all_observations.is_empty() {
-            info!("Sending step complete event with observations");
             step_complete.send(StepCompleteEvent {
                 observations: all_observations,
             });
@@ -308,7 +297,6 @@ fn handle_step_response(
     mut step_completes: EventReader<StepCompleteEvent>,
     server: Res<ServerState>,
 ) {
-    info!("Handling Step response");
     for event in step_completes.read() {
         if let Ok(guard) = server.conn.lock() {
             if let Ok(mut stream) = guard.try_clone() {
@@ -336,10 +324,9 @@ fn handle_step_response(
 /// * `agent_state` - The agent state resource.
 fn handle_commands(
     mut server: ResMut<ServerState>,
-    mut agent_state: ResMut<AgentState>,
+    agent_state: ResMut<AgentState>,
     mut step_writer: EventWriter<StepRequestEvent>,
 ) {
-    info!("Handling Commands...");
     let cmd = {
         let guard = server.conn.lock().unwrap();
         let stream = guard.try_clone().unwrap();
@@ -388,11 +375,11 @@ fn handle_commands(
                 println!("Server already initialized, ignoring command");
             }
             Command::Step { actions } => {
-                info!("Step Command started!");
+                info!("Step Command Received!");
                 step_writer.send(StepRequestEvent { actions });
-                info!("Request sent")
             }
             Command::Reset { seed } => {
+                info!("Reset Command Received!");
                 // Validate the seed
                 let valid_seed = match seed {
                     Some(seed_value) if seed_value > 0 => Some(seed_value), // Accept valid seeds
@@ -428,7 +415,7 @@ fn handle_commands(
                         }
                     }
                 } else {
-                    info!("No seed provided, leaving EnvConfig seed unchanged.");
+                    warn!("No seed provided, leaving EnvConfig seed unchanged.");
                 }
 
                 // Get a new clone for writing response
@@ -469,20 +456,6 @@ fn handle_commands(
                         }
                     }
                 }
-
-                // let debug_response = serde_json::json!({
-                //     "type": "Reset",
-                //     "received_seed": seed,
-                //     "debug_info": format!("Command was matched as Reset")
-                // });
-                // let response_str = serde_json::to_string(&debug_response).unwrap() + "\n";
-
-                // if let Ok(guard) = server.conn.lock() {
-                //     if let Ok(mut stream) = guard.try_clone() {
-                //         stream.write_all(response_str.as_bytes()).unwrap();
-                //         stream.flush().unwrap();
-                //     }
-                // }
             }
             Command::Close => {
                 // Close Bevy App

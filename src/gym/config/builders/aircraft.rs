@@ -1,4 +1,3 @@
-use bevy::prelude::Deref;
 use flyer::components::{
     AircraftAeroCoefficients, AircraftConfig, AircraftGeometry, AircraftType, DubinsAircraftConfig,
     FullAircraftConfig, MassModel,

@@ -1,13 +1,10 @@
-use bevy::{
-    app::{AppExit, ScheduleRunnerPlugin},
-    prelude::*,
-};
+use bevy::prelude::*;
 use flyer::{
     plugins::{
         add_aircraft_plugin, AgentPlugin, CameraPlugin, HeadlessPlugin, StartupSequencePlugin,
         TerrainPlugin, TransformationPlugin,
     },
-    resources::{RenderMode, StepCommand, UpdateControl, UpdateControlPlugin},
+    resources::{RenderMode, UpdateControlPlugin},
     systems::camera_follow_system,
 };
 
