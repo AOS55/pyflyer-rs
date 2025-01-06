@@ -3923,6 +3923,8 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tiny-skia",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
