@@ -71,7 +71,7 @@ docs/_build/
 .python-version
 
 # Ignore resources
-resources/
+#resources/
 
 # Ignore terrain_data configs
 terrain_data/
