@@ -18,38 +18,41 @@ mod terrain;
 use crate::gym::config::errors::ConfigError;
 use crate::gym::{ActionSpace, EnvConfig, ObservationSpace};
 use crate::utils::{RngManager, WithRng};
-use aircraft::{create_aircraft_builder, AircraftBuilder, AircraftBuilderEnum};
+pub use aircraft::{
+    create_aircraft_builder, AircraftBuilder, AircraftBuilderEnum, DubinsAircraftConfigBuilder,
+    FullAircraftConfigBuilder,
+};
 // use environment::EnvironmentConfigBuilder;
 pub use act::ActionSpaceBuilder;
 pub use obs::ObservationSpaceBuilder;
-use physics::PhysicsConfigBuilder;
+pub use physics::PhysicsConfigBuilder;
 use reward::RewardWeightsBuilder;
 use start::RandomStartPosConfigBuilder;
 use termination::TerminalConditionsBuilder;
-use terrain::TerrainConfigBuilder;
+pub use terrain::{HeightNoiseConfigBuilder, NoiseConfigBuilder, TerrainConfigBuilder};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnvConfigBuilder {
     #[serde(skip)]
-    rng_manager: Option<RngManager>,
-    max_episode_steps: Option<u32>,
-    steps_per_action: Option<usize>,
-    time_step: Option<f64>,
+    pub rng_manager: Option<RngManager>,
+    pub max_episode_steps: Option<u32>,
+    pub steps_per_action: Option<usize>,
+    pub time_step: Option<f64>,
     #[serde(skip)]
-    aircraft_builders: HashMap<String, AircraftBuilderEnum>,
+    pub aircraft_builders: HashMap<String, AircraftBuilderEnum>,
     #[serde(skip)]
-    action_builders: HashMap<String, ActionSpaceBuilder>,
+    pub action_builders: HashMap<String, ActionSpaceBuilder>,
     #[serde(skip)]
-    observation_builders: HashMap<String, ObservationSpaceBuilder>,
+    pub observation_builders: HashMap<String, ObservationSpaceBuilder>,
     #[serde(skip)]
-    physics_builder: PhysicsConfigBuilder,
+    pub physics_builder: PhysicsConfigBuilder,
     // environment_builder: EnvironmentConfigBuilder,
     #[serde(skip)]
-    terrain_builder: TerrainConfigBuilder,
+    pub terrain_builder: TerrainConfigBuilder,
     #[serde(skip)]
-    reward_builder: RewardWeightsBuilder,
+    pub reward_builder: RewardWeightsBuilder,
     #[serde(skip)]
-    terminal_builder: TerminalConditionsBuilder,
+    pub terminal_builder: TerminalConditionsBuilder,
 }
 
 impl Default for EnvConfigBuilder {
@@ -123,8 +126,14 @@ impl EnvConfigBuilder {
         if let Some(aircraft_configs) = json_value.get("aircraft_config").and_then(|v| v.as_array())
         {
             for (i, config) in aircraft_configs.iter().enumerate() {
-                let aircraft_agent = create_aircraft_builder(config)?;
                 let id = format!("aircraft_{}", i);
+                let mut aircraft_agent = create_aircraft_builder(config)?;
+
+                // Set id name in builder
+                match &mut aircraft_agent.aircraft_builder {
+                    AircraftBuilderEnum::Dubins(builder) => builder.name = Some(id.clone()),
+                    AircraftBuilderEnum::Full(builder) => builder.name = Some(id.clone()),
+                }
 
                 // Initialize each aircraft with its own RNG stream
                 builder.aircraft_builders.insert(

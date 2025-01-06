@@ -54,23 +54,15 @@ struct ServerState {
     config: EnvConfig,
 }
 
-// #[derive(Resource)]
-// struct StepState {
-//     needs_step: bool,
-//     step_count: usize,
-// }
+#[derive(Event)]
+pub struct StepRequestEvent {
+    pub actions: HashMap<String, Vec<f64>>,
+}
 
-// fn handle_stepping(
-//     mut state: ResMut<StepState>,
-//     mut update_control: ResMut<UpdateControl>,
-//     // Use window query to force main thread
-//     _window: Query<&Window, With<PrimaryWindow>>,
-// ) {
-//     if state.needs_step {
-//         update_control.remaining_steps = state.step_count;
-//         state.needs_step = false;
-//     }
-// }
+#[derive(Event)]
+pub struct StepCompleteEvent {
+    pub observations: HashMap<String, HashMap<String, f64>>,
+}
 
 /// Function to generate an ID object from an aircraft string ID.
 ///
@@ -164,15 +156,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     app = setup_app(app, env_config.clone(), asset_path);
 
-    // Add systems for handling commands
-    app.add_systems(Update, handle_commands);
-    // app.add_systems(Update, handle_stepping);
-
     // Mark the server state as initialized
     app.world_mut()
         .get_resource_mut::<ServerState>()
         .unwrap()
         .initialized = true;
+
+    // Add event and systems for handling step requests
+    app.add_systems(Update, handle_commands)
+        .add_event::<StepRequestEvent>()
+        .add_event::<StepCompleteEvent>()
+        .add_systems(
+            FixedUpdate,
+            (handle_step_request, apply_deferred)
+                .run_if(|control: Res<UpdateControl>| control.remaining_steps == 0),
+        )
+        .add_systems(
+            PostUpdate,
+            (check_step_completion, handle_step_response).chain(),
+        );
 
     // Run app
     println!("Starting Bevy app...");
@@ -232,6 +234,100 @@ fn receive_initial_config(stream: &Arc<Mutex<TcpStream>>) -> std::io::Result<ser
     }
 }
 
+fn handle_step_request(
+    server: ResMut<ServerState>,
+    mut step_requests: EventReader<StepRequestEvent>,
+    mut update_control: ResMut<UpdateControl>,
+    agent_state: ResMut<AgentState>,
+) {
+    info!("Handling Step request");
+    for request in step_requests.read() {
+        if let Ok(mut action_queue) = agent_state.action_queue.lock() {
+            // Apply actions
+            for (aircraft_id, action) in &request.actions {
+                if let Some(action_space) = server.config.action_spaces.get(aircraft_id) {
+                    let controls = action_space.to_controls(action.clone());
+                    let id = get_numeric_id(aircraft_id);
+                    action_queue.insert(id, controls);
+                }
+            }
+        }
+
+        // Set steps to execute
+        update_control.remaining_steps = server.config.steps_per_action;
+    }
+}
+
+fn check_step_completion(
+    update_control: Res<UpdateControl>,
+    agent_state: Res<AgentState>,
+    mut step_complete: EventWriter<StepCompleteEvent>,
+    server: Res<ServerState>,
+) {
+    info!(
+        "Checking step completion, remaining_steps: {}",
+        update_control.remaining_steps
+    );
+
+    if let Ok(state_buffer) = agent_state.state_buffer.lock() {
+        // Add check for empty state buffer
+        if state_buffer.is_empty() {
+            info!("State buffer empty, waiting for physics update");
+            return;
+        }
+
+        let mut all_observations = HashMap::new();
+        info!("state_buffer loop");
+        for (id, state) in state_buffer.iter() {
+            let id_str = match id {
+                Id::Named(name) => name.clone(),
+                Id::Entity(entity) => entity.to_string(),
+            };
+
+            info!("Step Completion id: {}, state: {:?}", id_str, state);
+
+            if let Some(obs_space) = server.config.observation_spaces.get(&id_str) {
+                let obs = obs_space.to_observation(state);
+                all_observations.insert(id_str, obs);
+            }
+        }
+
+        // Only send event if we have observations
+        if !all_observations.is_empty() {
+            info!("Sending step complete event with observations");
+            step_complete.send(StepCompleteEvent {
+                observations: all_observations,
+            });
+        } else {
+            warn!("No observations collected");
+        }
+    }
+}
+
+fn handle_step_response(
+    mut step_completes: EventReader<StepCompleteEvent>,
+    server: Res<ServerState>,
+) {
+    info!("Handling Step response");
+    for event in step_completes.read() {
+        if let Ok(guard) = server.conn.lock() {
+            if let Ok(mut stream) = guard.try_clone() {
+                let response = Response {
+                    obs: event.observations.clone(),
+                    reward: 0.0,
+                    terminated: false,
+                    truncated: false,
+                    info: serde_json::json!({}),
+                };
+
+                let response_str = serde_json::to_string(&response).unwrap() + "\n";
+                stream.write_all(response_str.as_bytes()).unwrap();
+                stream.flush().unwrap();
+            }
+        }
+    }
+}
+
 /// System to handle commands received from the client.
 ///
 /// # Arguments
@@ -240,8 +336,8 @@ fn receive_initial_config(stream: &Arc<Mutex<TcpStream>>) -> std::io::Result<ser
 /// * `agent_state` - The agent state resource.
 fn handle_commands(
     mut server: ResMut<ServerState>,
-    mut update_control: ResMut<UpdateControl>,
     mut agent_state: ResMut<AgentState>,
+    mut step_writer: EventWriter<StepRequestEvent>,
 ) {
     info!("Handling Commands...");
     let cmd = {
@@ -293,88 +389,8 @@ fn handle_commands(
             }
             Command::Step { actions } => {
                 info!("Step Command started!");
-                info!("actions: {:?}", actions);
-
-                if let Ok(mut action_queue) = agent_state.action_queue.lock() {
-                    // Parse action spaces
-
-                    for (aircraft_id, action) in actions {
-                        // Get the action space for this aircraft
-                        if let Some(action_space) = server.config.action_spaces.get(&aircraft_id) {
-                            // Convert normalized actions to actual controls
-                            let controls = action_space.to_controls(action);
-
-                            // You'll need a way to map string aircraft_id to numeric Id
-                            // This could be stored in ServerState or handled by a mapping function
-                            let id = get_numeric_id(&aircraft_id);
-
-                            // Insert controls for this aircraft
-                            action_queue.insert(id, controls);
-                        } else {
-                            warn!("Action space not found for aircraft: {}", aircraft_id);
-                        }
-                    }
-                    info!("Action Queue: {:?}", action_queue);
-                }
-
-                // Set step flag, wait to execute action queue for steps before moving to next step
-                update_control.remaining_steps = server.config.steps_per_action;
-                let current_steps = server.config.steps_per_action;
-                while current_steps == update_control.remaining_steps {
-                    // yield_now() allows other threads (including Bevy's) to run
-                    std::thread::yield_now();
-                }
-                // // Wait for steps to complete before sending response
-                // while update_control.remaining_steps > 0 {
-                //     // info!("remaining_steps: {}", update_control.remaining_steps);
-                //     std::thread::sleep(std::time::Duration::from_millis(1));
-                // }
-
-                // Get a new clone for writing response
-                if let Ok(guard) = server.conn.lock() {
-                    if let Ok(mut stream) = guard.try_clone() {
-                        if let Ok(state_buffer) = agent_state.state_buffer.lock() {
-                            // Collect Observations for all aircraft
-                            let mut all_observations = HashMap::new();
-
-                            for (id, state) in state_buffer.iter() {
-                                info!("id: {:?}, state: {:?}", id, state);
-
-                                // Get the observation space for this aircraft
-                                let id_str = match id {
-                                    Id::Named(name) => name.clone(),
-                                    Id::Entity(entity) => entity.to_string(),
-                                };
-
-                                // Get the observation space for this aircraft
-                                if let Some(obs_space) =
-                                    server.config.observation_spaces.get(&id_str)
-                                {
-                                    // Convert state to observation
-                                    let obs = obs_space.to_observation(state);
-                                    all_observations.insert(id_str, obs);
-                                } else {
-                                    warn!("Observation space not found for aircraft: {:?}", id);
-                                }
-                            }
-
-                            let response_str =
-                                serde_json::to_string(&all_observations).unwrap() + "\n";
-                            stream.write_all(response_str.as_bytes()).unwrap();
-                            stream.flush().unwrap();
-
-                            // let response = Response {
-                            //     obs: all_observations,
-                            //     reward: 0.0,
-                            //     terminated: agent_state.terminated,
-                            //     truncated: agent_state.truncated,
-                            //     info: serde_json::json!({}),
-                            // };
-                            // writeln!(stream, "{}", serde_json::to_string(&response).unwrap())
-                            //     .unwrap();
-                        }
-                    }
-                }
+                step_writer.send(StepRequestEvent { actions });
+                info!("Request sent")
             }
             Command::Reset { seed } => {
                 // Validate the seed
@@ -400,15 +416,20 @@ fn handle_commands(
                     None => None, // No seed provided, leave as is
                 };
 
+                // Rebuild the EnvConfig with the new seed
                 if let Some(seed_value) = valid_seed {
-                    println!("Updating seed in EnvConfig to: {}", seed_value);
-                    server.config.seed = Some(seed_value).unwrap();
+                    match server.config.rebuild_with_seed(seed_value) {
+                        Ok(new_config) => {
+                            server.config = new_config;
+                        }
+                        Err(e) => {
+                            error!("Error rebuilding config: {}", e);
+                            // Handle error appropriately
+                        }
+                    }
                 } else {
-                    println!("No seed provided, leaving EnvConfig seed unchanged.");
+                    info!("No seed provided, leaving EnvConfig seed unchanged.");
                 }
-
-                // Reset the agent state
-                agent_state.reset();
 
                 // Get a new clone for writing response
                 if let Ok(guard) = server.conn.lock() {

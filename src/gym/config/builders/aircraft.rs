@@ -44,15 +44,15 @@ impl AircraftBuilder for AircraftBuilderEnum {
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct DubinsAircraftConfigBuilder {
-    name: Option<String>,
-    max_speed: Option<f64>,
-    min_speed: Option<f64>,
-    acceleration: Option<f64>,
-    max_bank_angle: Option<f64>,
-    max_turn_rate: Option<f64>,
-    max_climb_rate: Option<f64>,
-    max_descent_rate: Option<f64>,
-    random_start_config: RandomStartPosConfigBuilder,
+    pub name: Option<String>,
+    pub max_speed: Option<f64>,
+    pub min_speed: Option<f64>,
+    pub acceleration: Option<f64>,
+    pub max_bank_angle: Option<f64>,
+    pub max_turn_rate: Option<f64>,
+    pub max_climb_rate: Option<f64>,
+    pub max_descent_rate: Option<f64>,
+    pub random_start_config: RandomStartPosConfigBuilder,
     #[serde(skip)]
     rng: Option<ChaCha8Rng>,
 }
