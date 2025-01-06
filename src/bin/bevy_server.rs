@@ -16,6 +16,7 @@ use pyflyer::gym::{setup_app, ActionSpace, ConfigError, EnvConfig, ToControls, T
 
 /// Enum representing commands sent to the server.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 enum Command {
     /// Initialize the environment with a configuration.
     Initialize { config: serde_json::Value },
@@ -30,8 +31,8 @@ enum Command {
 /// Struct representing the response from the server after handling a command.
 #[derive(Debug, Serialize, Deserialize)]
 struct Response {
-    /// Observation data from the environment.
-    obs: Vec<f64>,
+    /// Observation data from the environment (for each aircraft).
+    obs: HashMap<String, HashMap<String, f64>>,
     /// Reward for the current step.
     reward: f64,
     /// Whether the episode is terminated.
@@ -87,16 +88,17 @@ fn get_numeric_id(aircraft_id: &str) -> Id {
 /// # Returns
 /// * `Result<(), Box<dyn std::error::Error>>` - Ok if the server starts successfully, an error otherwise.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize logging
+    // setup_logging();
+
     println!("Starting Bevy server...");
 
     // Start TCP server
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    println!("PORT={}", port);
+    println!("PORT={}", listener.local_addr().unwrap().port());
 
     // Accept one connection
-    let (stream, addr) = listener.accept().unwrap();
-    println!("Connection accepted from: {}", addr);
+    let (stream, _addr) = listener.accept().unwrap();
     let stream = Arc::new(Mutex::new(stream));
 
     // Wait for initial config
@@ -111,7 +113,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Send ready signal
     {
-        let response = serde_json::json!({ "status": "ready" });
+        let aircraft_info: Vec<_> = env_config
+            .aircraft_configs
+            .keys()
+            .map(|name| {
+                serde_json::json!({
+                    "name": name,
+                    "config": env_config.aircraft_configs.get(name).unwrap(),
+                    "action_space": env_config.action_spaces.get(name).unwrap(),
+                    "observation_space": env_config.observation_spaces.get(name).unwrap()
+                })
+            })
+            .collect();
+
+        let response = serde_json::json!({
+            "status": "ready",
+            "aircraft": aircraft_info
+        });
         let response_str = serde_json::to_string(&response)? + "\n";
         match stream.lock() {
             Ok(guard) => {
@@ -171,7 +189,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// # Returns
 /// * `Result<serde_json::Value, std::io::Error>` - The configuration data or an error.
 fn receive_initial_config(stream: &Arc<Mutex<TcpStream>>) -> std::io::Result<serde_json::Value> {
-    println!("Attempting to receive initial config...");
+    info!("Attempting to receive initial config...");
     let guard = match stream.lock() {
         Ok(guard) => guard,
         Err(e) => {
@@ -204,23 +222,6 @@ fn receive_initial_config(stream: &Arc<Mutex<TcpStream>>) -> std::io::Result<ser
     match cmd {
         Command::Initialize { config } => {
             println!("Got Initialize command with config");
-
-            // Immediately send ready response
-            let response = serde_json::json!({ "status": "ready" });
-            let response_str = serde_json::to_string(&response)? + "\n";
-
-            // Write response using the original guard to maintain lock
-            match guard.try_clone()?.write_all(response_str.as_bytes()) {
-                Ok(_) => println!("Wrote response bytes"),
-                Err(e) => eprintln!("Failed to write response: {}", e),
-            }
-
-            match guard.try_clone()?.flush() {
-                Ok(_) => println!("Flushed stream"),
-                Err(e) => eprintln!("Failed to flush stream: {}", e),
-            }
-
-            println!("Sent ready response: {}", response_str);
             Ok(config)
         }
         _ => {
@@ -240,32 +241,28 @@ fn receive_initial_config(stream: &Arc<Mutex<TcpStream>>) -> std::io::Result<ser
 fn handle_commands(
     mut server: ResMut<ServerState>,
     mut update_control: ResMut<UpdateControl>,
-    agent_state: ResMut<AgentState>,
+    mut agent_state: ResMut<AgentState>,
 ) {
-    if !server.initialized {
-        // Ignore commands until initialized
-        println!("Server not initialized yet, ignoring command");
-        return;
-    }
-
-    println!("Handle commands called");
-
+    info!("Handling Commands...");
     let cmd = {
         let guard = server.conn.lock().unwrap();
-        // Clone the stream first to get a mutable copy
         let stream = guard.try_clone().unwrap();
         let mut reader = BufReader::new(stream);
         let mut line = String::new();
 
         if reader.read_line(&mut line).is_ok() && !line.is_empty() {
-            println!("Received command: {}", line.trim());
             match serde_json::from_str::<Command>(&line) {
-                Ok(cmd) => {
-                    println!("Parsed command: {:?}", cmd); // Show parsed command
-                    Some(cmd)
-                }
+                Ok(cmd) => Some(cmd),
                 Err(e) => {
-                    println!("Failed to parse command: {}", e);
+                    error!("Failed to parse command: {}", e);
+                    if let Ok(mut stream) = guard.try_clone() {
+                        let error_response = serde_json::json!({
+                            "error": format!("Invalid command format: {}", e)
+                        });
+                        let response_str = serde_json::to_string(&error_response).unwrap() + "\n";
+                        stream.write_all(response_str.as_bytes()).unwrap();
+                        stream.flush().unwrap();
+                    }
                     None
                 }
             }
@@ -274,18 +271,33 @@ fn handle_commands(
         }
     };
 
-    // Non-blocking read
     if let Some(cmd) = cmd {
-        println!("Processing command: {:?}", cmd);
         match cmd {
             Command::Initialize { .. } => {
+                let debug_response = serde_json::json!({
+                    "type": "Initialize",
+                    "debug_info": format!("Command was matched as Initialize")
+                });
+                let response_str = serde_json::to_string(&debug_response).unwrap() + "\n";
+
+                if let Ok(guard) = server.conn.lock() {
+                    if let Ok(mut stream) = guard.try_clone() {
+                        let response_str = serde_json::to_string(&response_str).unwrap() + "\n";
+                        stream.write_all(response_str.as_bytes()).unwrap();
+                        stream.flush().unwrap();
+                    }
+                }
+
                 // Ignore after initial setup
+                println!("Server already initialized, ignoring command");
             }
             Command::Step { actions } => {
-                // TODO: Consider using std::sync::condvar here
+                info!("Step Command started!");
+                info!("actions: {:?}", actions);
 
-                // Process actions for each aircaft and add to queue
                 if let Ok(mut action_queue) = agent_state.action_queue.lock() {
+                    // Parse action spaces
+
                     for (aircraft_id, action) in actions {
                         // Get the action space for this aircraft
                         if let Some(action_space) = server.config.action_spaces.get(&aircraft_id) {
@@ -302,22 +314,108 @@ fn handle_commands(
                             warn!("Action space not found for aircraft: {}", aircraft_id);
                         }
                     }
+                    info!("Action Queue: {:?}", action_queue);
                 }
 
                 // Set step flag, wait to execute action queue for steps before moving to next step
                 update_control.remaining_steps = server.config.steps_per_action;
-
-                // Wait for steps to complete before sending response
-                while update_control.remaining_steps > 0 {
-                    std::thread::sleep(std::time::Duration::from_millis(1));
+                let current_steps = server.config.steps_per_action;
+                while current_steps == update_control.remaining_steps {
+                    // yield_now() allows other threads (including Bevy's) to run
+                    std::thread::yield_now();
                 }
+                // // Wait for steps to complete before sending response
+                // while update_control.remaining_steps > 0 {
+                //     // info!("remaining_steps: {}", update_control.remaining_steps);
+                //     std::thread::sleep(std::time::Duration::from_millis(1));
+                // }
 
                 // Get a new clone for writing response
                 if let Ok(guard) = server.conn.lock() {
                     if let Ok(mut stream) = guard.try_clone() {
                         if let Ok(state_buffer) = agent_state.state_buffer.lock() {
                             // Collect Observations for all aircraft
-                            let mut all_observations = Vec::new();
+                            let mut all_observations = HashMap::new();
+
+                            for (id, state) in state_buffer.iter() {
+                                info!("id: {:?}, state: {:?}", id, state);
+
+                                // Get the observation space for this aircraft
+                                let id_str = match id {
+                                    Id::Named(name) => name.clone(),
+                                    Id::Entity(entity) => entity.to_string(),
+                                };
+
+                                // Get the observation space for this aircraft
+                                if let Some(obs_space) =
+                                    server.config.observation_spaces.get(&id_str)
+                                {
+                                    // Convert state to observation
+                                    let obs = obs_space.to_observation(state);
+                                    all_observations.insert(id_str, obs);
+                                } else {
+                                    warn!("Observation space not found for aircraft: {:?}", id);
+                                }
+                            }
+
+                            let response_str =
+                                serde_json::to_string(&all_observations).unwrap() + "\n";
+                            stream.write_all(response_str.as_bytes()).unwrap();
+                            stream.flush().unwrap();
+
+                            // let response = Response {
+                            //     obs: all_observations,
+                            //     reward: 0.0,
+                            //     terminated: agent_state.terminated,
+                            //     truncated: agent_state.truncated,
+                            //     info: serde_json::json!({}),
+                            // };
+                            // writeln!(stream, "{}", serde_json::to_string(&response).unwrap())
+                            //     .unwrap();
+                        }
+                    }
+                }
+            }
+            Command::Reset { seed } => {
+                // Validate the seed
+                let valid_seed = match seed {
+                    Some(seed_value) if seed_value > 0 => Some(seed_value), // Accept valid seeds
+                    Some(_) => {
+                        // Invalid seed value
+                        let error_response = serde_json::json!({
+                            "error": "Invalid seed value. Seed must be a positive integer."
+                        });
+                        if let Ok(guard) = server.conn.lock() {
+                            if let Ok(mut stream) = guard.try_clone() {
+                                stream
+                                    .write_all(
+                                        serde_json::to_string(&error_response).unwrap().as_bytes(),
+                                    )
+                                    .unwrap();
+                                stream.flush().unwrap();
+                            }
+                        }
+                        return; // Exit early on error
+                    }
+                    None => None, // No seed provided, leave as is
+                };
+
+                if let Some(seed_value) = valid_seed {
+                    println!("Updating seed in EnvConfig to: {}", seed_value);
+                    server.config.seed = Some(seed_value).unwrap();
+                } else {
+                    println!("No seed provided, leaving EnvConfig seed unchanged.");
+                }
+
+                // Reset the agent state
+                agent_state.reset();
+
+                // Get a new clone for writing response
+                if let Ok(guard) = server.conn.lock() {
+                    if let Ok(mut stream) = guard.try_clone() {
+                        if let Ok(state_buffer) = agent_state.state_buffer.lock() {
+                            // Collect Observations for all aircraft
+                            let mut all_observations = HashMap::new();
 
                             for (id, state) in state_buffer.iter() {
                                 // Get the observation space for this aircraft
@@ -332,7 +430,7 @@ fn handle_commands(
                                 {
                                     // Convert state to observation
                                     let obs = obs_space.to_observation(state);
-                                    all_observations.extend(obs);
+                                    all_observations.insert(id_str, obs);
                                 } else {
                                     warn!("Observation space not found for aircraft: {:?}", id);
                                 }
@@ -350,68 +448,33 @@ fn handle_commands(
                         }
                     }
                 }
-            }
-            Command::Reset { seed } => {
-                println!("Handling Reset command");
 
-                // Clear action queue
-                if let Ok(mut action_queue) = agent_state.action_queue.lock() {
-                    action_queue.clear();
-                }
+                // let debug_response = serde_json::json!({
+                //     "type": "Reset",
+                //     "received_seed": seed,
+                //     "debug_info": format!("Command was matched as Reset")
+                // });
+                // let response_str = serde_json::to_string(&debug_response).unwrap() + "\n";
 
-                update_control.remaining_steps = server.config.steps_per_action;
-                while update_control.remaining_steps > 0 {
-                    std::thread::sleep(std::time::Duration::from_millis(1));
-                }
-
-                // Create response with proper error handling
-                let result = match (server.conn.lock(), agent_state.state_buffer.lock()) {
-                    (Ok(guard), Ok(state_buffer)) => {
-                        if let Ok(mut stream) = guard.try_clone() {
-                            let mut all_observations = Vec::new();
-
-                            for (id, state) in state_buffer.iter() {
-                                let id_str = match id {
-                                    Id::Named(name) => name.clone(),
-                                    Id::Entity(entity) => entity.to_string(),
-                                };
-
-                                if let Some(obs_space) =
-                                    server.config.observation_spaces.get(&id_str)
-                                {
-                                    let obs = obs_space.to_observation(state);
-                                    all_observations.extend(obs);
-                                } else {
-                                    warn!("Observation space not found for aircraft: {:?}", id);
-                                }
-                            }
-
-                            let response = Response {
-                                obs: all_observations,
-                                reward: 0.0,
-                                terminated: false,
-                                truncated: false,
-                                info: serde_json::json!({}),
-                            };
-
-                            // Log response for debugging
-                            println!("Sending reset response: {:?}", response);
-                            let response = "test";
-
-                            if let Err(e) =
-                                writeln!(stream, "{}", serde_json::to_string(&response).unwrap())
-                            {
-                                error!("Failed to write response: {}", e);
-                            }
-                        }
-                    }
-                    (Err(e1), _) => error!("Failed to lock connection: {}", e1),
-                    (_, Err(e2)) => error!("Failed to lock state buffer: {}", e2),
-                };
-                result
+                // if let Ok(guard) = server.conn.lock() {
+                //     if let Ok(mut stream) = guard.try_clone() {
+                //         stream.write_all(response_str.as_bytes()).unwrap();
+                //         stream.flush().unwrap();
+                //     }
+                // }
             }
             Command::Close => {
-                // Handle close command
+                // Close Bevy App
+                if let Ok(guard) = server.conn.lock() {
+                    if let Ok(mut stream) = guard.try_clone() {
+                        let response = "Close command called";
+                        let response_str = serde_json::to_string(&response).unwrap() + "\n";
+                        stream.write_all(response_str.as_bytes()).unwrap();
+                        stream.flush().unwrap();
+                    }
+                }
+
+                // TODO: add a Bevy close system hook
             }
         }
     }
