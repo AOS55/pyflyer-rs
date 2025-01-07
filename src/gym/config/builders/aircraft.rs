@@ -1,6 +1,10 @@
-use flyer::components::{
-    AircraftAeroCoefficients, AircraftConfig, AircraftGeometry, AircraftType, DubinsAircraftConfig,
-    FullAircraftConfig, MassModel,
+use bevy::prelude::*;
+use flyer::{
+    components::{
+        AircraftAeroCoefficients, AircraftConfig, AircraftGeometry, AircraftType,
+        DubinsAircraftConfig, FullAircraftConfig, MassModel,
+    },
+    utils::WithRng,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -13,7 +17,6 @@ use crate::gym::config::builders::{
 use crate::gym::config::errors::ConfigError;
 use crate::gym::obs::ContinuousObservationSpace;
 use crate::gym::{ActionSpace, ObservationSpace};
-use crate::utils::WithRng;
 
 pub struct AircraftAgentBuilder {
     pub aircraft_builder: AircraftBuilderEnum,
@@ -95,14 +98,17 @@ impl DubinsAircraftConfigBuilder {
 
 impl AircraftBuilder for DubinsAircraftConfigBuilder {
     fn build(&self) -> Result<AircraftConfig, ConfigError> {
+        info!("Building DubinsAircraftConfig with RNG: {:?}", self.rng);
         let default_config = DubinsAircraftConfig::default();
 
         let random_start_config = if let Some(rng) = &self.rng {
+            info!("Using provided RNG for random_start_config");
             self.random_start_config
                 .clone()
                 .with_rng(rng.clone())
                 .build()
         } else {
+            info!("No RNG provided, using default");
             self.random_start_config.clone().build()
         };
 
@@ -243,6 +249,7 @@ fn parse_geometry_json(value: &Value) -> Result<Option<AircraftGeometry>, Config
 
 impl WithRng for DubinsAircraftConfigBuilder {
     fn with_rng(mut self, rng: ChaCha8Rng) -> Self {
+        info!("Setting RNG for Dubins aircraft config: {:?}", rng);
         self.rng = Some(rng);
         self
     }

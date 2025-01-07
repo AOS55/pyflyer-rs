@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 use flyer::{
-    plugins::Id,
+    plugins::{Id, ResetCompleteEvent, ResetRequestEvent},
     resources::{AgentState, UpdateControl},
+    systems::reset_env,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -176,6 +177,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             (check_step_completion, handle_step_response).chain(),
         );
 
+    // Add event for handling reset requests
+    app.add_event::<ResetRequestEvent>()
+        .add_event::<ResetCompleteEvent>()
+        .add_systems(Update, reset_env)
+        .add_systems(PostUpdate, handle_reset_response);
+
     // Run app
     println!("Starting Bevy app...");
     app.run();
@@ -316,6 +323,46 @@ fn handle_step_response(
     }
 }
 
+fn handle_reset_response(
+    mut reset_complete: EventReader<ResetCompleteEvent>,
+    agent_state: Res<AgentState>,
+    server: Res<ServerState>,
+) {
+    for _ in reset_complete.read() {
+        if let Ok(guard) = server.conn.lock() {
+            if let Ok(mut stream) = guard.try_clone() {
+                if let Ok(state_buffer) = agent_state.state_buffer.lock() {
+                    let mut all_observations = HashMap::new();
+
+                    for (id, state) in state_buffer.iter() {
+                        let id_str = match id {
+                            Id::Named(name) => name.clone(),
+                            Id::Entity(entity) => entity.to_string(),
+                        };
+
+                        if let Some(obs_space) = server.config.observation_spaces.get(&id_str) {
+                            let obs = obs_space.to_observation(state);
+                            all_observations.insert(id_str, obs);
+                        }
+                    }
+
+                    let response = Response {
+                        obs: all_observations,
+                        reward: 0.0,
+                        terminated: false,
+                        truncated: false,
+                        info: serde_json::json!({}),
+                    };
+
+                    let response_str = serde_json::to_string(&response).unwrap() + "\n";
+                    stream.write_all(response_str.as_bytes()).unwrap();
+                    stream.flush().unwrap();
+                }
+            }
+        }
+    }
+}
+
 /// System to handle commands received from the client.
 ///
 /// # Arguments
@@ -325,7 +372,8 @@ fn handle_step_response(
 fn handle_commands(
     mut server: ResMut<ServerState>,
     agent_state: ResMut<AgentState>,
-    mut step_writer: EventWriter<StepRequestEvent>,
+    mut step_events: EventWriter<StepRequestEvent>,
+    mut reset_events: EventWriter<ResetRequestEvent>,
 ) {
     let cmd = {
         let guard = server.conn.lock().unwrap();
@@ -376,86 +424,39 @@ fn handle_commands(
             }
             Command::Step { actions } => {
                 info!("Step Command Received!");
-                step_writer.send(StepRequestEvent { actions });
+                step_events.send(StepRequestEvent { actions });
             }
             Command::Reset { seed } => {
-                info!("Reset Command Received!");
-                // Validate the seed
-                let valid_seed = match seed {
-                    Some(seed_value) if seed_value > 0 => Some(seed_value), // Accept valid seeds
-                    Some(_) => {
-                        // Invalid seed value
-                        let error_response = serde_json::json!({
-                            "error": "Invalid seed value. Seed must be a positive integer."
-                        });
-                        if let Ok(guard) = server.conn.lock() {
-                            if let Ok(mut stream) = guard.try_clone() {
-                                stream
-                                    .write_all(
-                                        serde_json::to_string(&error_response).unwrap().as_bytes(),
-                                    )
-                                    .unwrap();
-                                stream.flush().unwrap();
-                            }
-                        }
-                        return; // Exit early on error
-                    }
-                    None => None, // No seed provided, leave as is
-                };
+                info!("Reset Command Received with seed: {:?}", seed);
 
-                // Rebuild the EnvConfig with the new seed
-                if let Some(seed_value) = valid_seed {
+                // Rebuild EnvConfig with new seed if provided
+                if let Some(seed_value) = seed {
                     match server.config.rebuild_with_seed(seed_value) {
                         Ok(new_config) => {
                             server.config = new_config;
+                            info!("Successfully rebuilt EnvConfig with seed: {}", seed_value);
                         }
                         Err(e) => {
-                            error!("Error rebuilding config: {}", e);
-                            // Handle error appropriately
-                        }
-                    }
-                } else {
-                    warn!("No seed provided, leaving EnvConfig seed unchanged.");
-                }
-
-                // Get a new clone for writing response
-                if let Ok(guard) = server.conn.lock() {
-                    if let Ok(mut stream) = guard.try_clone() {
-                        if let Ok(state_buffer) = agent_state.state_buffer.lock() {
-                            // Collect Observations for all aircraft
-                            let mut all_observations = HashMap::new();
-
-                            for (id, state) in state_buffer.iter() {
-                                // Get the observation space for this aircraft
-                                let id_str = match id {
-                                    Id::Named(name) => name.clone(),
-                                    Id::Entity(entity) => entity.to_string(),
-                                };
-
-                                // Get the observation space for this aircraft
-                                if let Some(obs_space) =
-                                    server.config.observation_spaces.get(&id_str)
-                                {
-                                    // Convert state to observation
-                                    let obs = obs_space.to_observation(state);
-                                    all_observations.insert(id_str, obs);
-                                } else {
-                                    warn!("Observation space not found for aircraft: {:?}", id);
+                            error!("Failed to rebuild EnvConfig: {}", e);
+                            if let Ok(guard) = server.conn.lock() {
+                                if let Ok(mut stream) = guard.try_clone() {
+                                    let error_response = serde_json::json!({
+                                        "error": format!("Failed to rebuild config with seed {}: {}", seed_value, e)
+                                    });
+                                    let response_str =
+                                        serde_json::to_string(&error_response).unwrap() + "\n";
+                                    stream.write_all(response_str.as_bytes()).unwrap();
+                                    stream.flush().unwrap();
                                 }
                             }
-
-                            let response = Response {
-                                obs: all_observations,
-                                reward: 0.0,
-                                terminated: agent_state.terminated,
-                                truncated: agent_state.truncated,
-                                info: serde_json::json!({}),
-                            };
-                            writeln!(stream, "{}", serde_json::to_string(&response).unwrap())
-                                .unwrap();
+                            return;
                         }
                     }
                 }
+
+                // Send reset event with the seed
+                info!("Sending ResetRequestEvent with seed: {:?}", seed);
+                reset_events.send(ResetRequestEvent { seed });
             }
             Command::Close => {
                 // Close Bevy App

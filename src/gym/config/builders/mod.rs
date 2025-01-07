@@ -1,5 +1,8 @@
-use flyer::components::AircraftConfig;
-use flyer::resources::{AgentConfig, UpdateMode};
+use flyer::{
+    components::AircraftConfig,
+    resources::{AgentConfig, UpdateMode},
+    utils::{RngManager, WithRng},
+};
 use rand;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -17,7 +20,6 @@ mod terrain;
 
 use crate::gym::config::errors::ConfigError;
 use crate::gym::{ActionSpace, EnvConfig, ObservationSpace};
-use crate::utils::{RngManager, WithRng};
 pub use aircraft::{
     create_aircraft_builder, AircraftBuilder, AircraftBuilderEnum, DubinsAircraftConfigBuilder,
     FullAircraftConfigBuilder,

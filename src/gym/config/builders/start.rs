@@ -1,12 +1,11 @@
-use flyer::components::RandomStartPosConfig;
+use bevy::prelude::*;
+use flyer::{components::RandomStartPosConfig, utils::WithRng};
 use nalgebra::Vector2;
-use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::gym::config::ConfigError;
-use crate::utils::WithRng;
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct RandomStartPosConfigBuilder {
@@ -14,8 +13,7 @@ pub struct RandomStartPosConfigBuilder {
     variance: Option<f64>,
     min_altitude: Option<f64>,
     max_altitude: Option<f64>,
-    #[serde(skip)]
-    rng: Option<ChaCha8Rng>,
+    seed: Option<u64>,
 }
 
 impl RandomStartPosConfigBuilder {
@@ -45,9 +43,11 @@ impl RandomStartPosConfigBuilder {
     }
 
     pub fn build(&self) -> RandomStartPosConfig {
+        info!("Building RandomStartPosConfig with seed: {:?}", self.seed);
+
         let default_config = RandomStartPosConfig::default();
 
-        RandomStartPosConfig {
+        let mut config = RandomStartPosConfig {
             origin: self.origin.unwrap_or_else(|| default_config.origin),
             variance: self.variance.unwrap_or_else(|| default_config.variance),
             min_altitude: self
@@ -56,14 +56,18 @@ impl RandomStartPosConfigBuilder {
             max_altitude: self
                 .max_altitude
                 .unwrap_or_else(|| default_config.max_altitude),
-            rng: self.rng.clone().unwrap_or_else(ChaCha8Rng::from_entropy),
-        }
+            seed: self.seed,
+        };
+
+        config.build()
     }
 }
 
 impl WithRng for RandomStartPosConfigBuilder {
     fn with_rng(mut self, rng: ChaCha8Rng) -> Self {
-        self.rng = Some(rng);
+        let new_seed = rng.get_seed()[0] as u64;
+        info!("Setting seed for RandomStartPosConfigBuilder: {}", new_seed);
+        self.seed = Some(new_seed);
         self
     }
 }

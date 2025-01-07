@@ -1,3 +1,4 @@
+use bevy::prelude::*;
 use flyer::components::AircraftState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -56,6 +57,8 @@ impl ToObservation for ContinuousObservationSpace {
                 obs.insert("heading".to_string(), heading);
                 obs.insert("altitude".to_string(), altitude);
                 obs.insert("airspeed".to_string(), airspeed);
+
+                info!("Raw Observation: {:?}", obs);
 
                 obs
             }

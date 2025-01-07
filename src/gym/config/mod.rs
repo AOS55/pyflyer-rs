@@ -1,24 +1,23 @@
+use bevy::prelude::*;
 use flyer::{
     components::{AircraftConfig, TerminalConditions},
     resources::{
         AgentConfig, EnvironmentConfig, PhysicsConfig, RewardWeights, TerrainConfig, UpdateMode,
     },
+    utils::{RngManager, WithRng},
 };
 use serde_json::Value;
 use std::collections::HashMap;
 
-pub use crate::{
-    gym::{
-        config::{
-            builders::{
-                DubinsAircraftConfigBuilder, FullAircraftConfigBuilder, HeightNoiseConfigBuilder,
-                NoiseConfigBuilder, PhysicsConfigBuilder, TerrainConfigBuilder,
-            },
-            ConfigError,
+pub use crate::gym::{
+    config::{
+        builders::{
+            DubinsAircraftConfigBuilder, FullAircraftConfigBuilder, HeightNoiseConfigBuilder,
+            NoiseConfigBuilder, PhysicsConfigBuilder, TerrainConfigBuilder,
         },
-        ActionSpace, ObservationSpace,
+        ConfigError,
     },
-    utils::{RngManager, WithRng},
+    ActionSpace, ObservationSpace,
 };
 
 mod builders;
@@ -79,6 +78,7 @@ impl Default for EnvConfig {
 
 impl EnvConfig {
     pub fn rebuild_with_seed(&self, new_seed: u64) -> Result<Self, ConfigError> {
+        info!("Rebuilding config with seed: {}", new_seed);
         let mut builder = EnvConfigBuilder::new()
             .max_episode_steps(self.max_episode_steps)
             .steps_per_action(self.steps_per_action)
