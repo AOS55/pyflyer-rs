@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use flyer::{
-    plugins::{Id, ResetCompleteEvent, ResetRequestEvent},
+    plugins::{Id, ResetCompleteEvent, ResetRequestEvent, StepCompleteEvent, StepRequestEvent},
     resources::{AgentState, UpdateControl},
     systems::reset_env,
 };
@@ -55,16 +55,6 @@ struct ServerState {
     initialized: bool,
     /// Configuration of the environment.
     config: EnvConfig,
-}
-
-#[derive(Event)]
-pub struct StepRequestEvent {
-    pub actions: HashMap<String, HashMap<String, f64>>,
-}
-
-#[derive(Event)]
-pub struct StepCompleteEvent {
-    pub observations: HashMap<String, HashMap<String, f64>>,
 }
 
 /// Function to generate an ID object from an aircraft string ID.
