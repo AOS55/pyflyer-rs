@@ -22,7 +22,9 @@ enum Command {
     /// Initialize the environment with a configuration.
     Initialize { config: serde_json::Value },
     /// Perform a simulation step with provided actions.
-    Step { actions: HashMap<String, Vec<f64>> },
+    Step {
+        actions: HashMap<String, HashMap<String, f64>>,
+    },
     /// Reset the environment with an optional random seed.
     Reset { seed: Option<u64> },
     /// Close the server connection.
@@ -57,7 +59,7 @@ struct ServerState {
 
 #[derive(Event)]
 pub struct StepRequestEvent {
-    pub actions: HashMap<String, Vec<f64>>,
+    pub actions: HashMap<String, HashMap<String, f64>>,
 }
 
 #[derive(Event)]
@@ -164,24 +166,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .initialized = true;
 
     // Add event and systems for handling step requests
-    app.add_systems(Update, handle_commands)
+    app.add_systems(FixedPreUpdate, handle_commands)
         .add_event::<StepRequestEvent>()
         .add_event::<StepCompleteEvent>()
         .add_systems(
             FixedUpdate,
             (handle_step_request, apply_deferred)
+                .chain()
                 .run_if(|control: Res<UpdateControl>| control.remaining_steps == 0),
         )
         .add_systems(
-            PostUpdate,
+            FixedPostUpdate,
             (check_step_completion, handle_step_response).chain(),
         );
 
     // Add event for handling reset requests
     app.add_event::<ResetRequestEvent>()
         .add_event::<ResetCompleteEvent>()
-        .add_systems(Update, reset_env)
-        .add_systems(PostUpdate, handle_reset_response);
+        .add_systems(FixedUpdate, reset_env)
+        .add_systems(FixedPostUpdate, handle_reset_response);
 
     // Run app
     println!("Starting Bevy app...");
@@ -424,6 +427,7 @@ fn handle_commands(
             }
             Command::Step { actions } => {
                 info!("Step Command Received!");
+                info!("actions: {:?}", actions);
                 step_events.send(StepRequestEvent { actions });
             }
             Command::Reset { seed } => {

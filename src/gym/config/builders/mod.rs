@@ -29,7 +29,10 @@ pub use act::ActionSpaceBuilder;
 pub use obs::ObservationSpaceBuilder;
 pub use physics::PhysicsConfigBuilder;
 use reward::RewardWeightsBuilder;
-use start::RandomStartPosConfigBuilder;
+pub use start::{
+    RandomHeadingConfigBuilder, RandomPosConfigBuilder, RandomSpeedConfigBuilder,
+    RandomStartConfigBuilder,
+};
 use termination::TerminalConditionsBuilder;
 pub use terrain::{HeightNoiseConfigBuilder, NoiseConfigBuilder, TerrainConfigBuilder};
 
@@ -129,7 +132,7 @@ impl EnvConfigBuilder {
         {
             for (i, config) in aircraft_configs.iter().enumerate() {
                 let id = format!("aircraft_{}", i);
-                let mut aircraft_agent = create_aircraft_builder(config)?;
+                let mut aircraft_agent = create_aircraft_builder(config, seed)?; // Might need to add to the seed to seperate aircraft or rng to the seed
 
                 // Set id name in builder
                 match &mut aircraft_agent.aircraft_builder {

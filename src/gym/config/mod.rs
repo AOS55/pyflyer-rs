@@ -13,7 +13,9 @@ pub use crate::gym::{
     config::{
         builders::{
             DubinsAircraftConfigBuilder, FullAircraftConfigBuilder, HeightNoiseConfigBuilder,
-            NoiseConfigBuilder, PhysicsConfigBuilder, TerrainConfigBuilder,
+            NoiseConfigBuilder, PhysicsConfigBuilder, RandomHeadingConfigBuilder,
+            RandomPosConfigBuilder, RandomSpeedConfigBuilder, RandomStartConfigBuilder,
+            TerrainConfigBuilder,
         },
         ConfigError,
     },
@@ -101,13 +103,50 @@ impl EnvConfig {
                     aircraft_builder.max_turn_rate = Some(dubins.max_turn_rate);
                     aircraft_builder.max_climb_rate = Some(dubins.max_climb_rate);
                     aircraft_builder.max_descent_rate = Some(dubins.max_descent_rate);
+                    aircraft_builder.seed = Some(new_seed);
 
-                    builder.aircraft_builders.insert(
-                        id.clone(),
-                        AircraftBuilderEnum::Dubins(
-                            aircraft_builder.with_rng(rng_manager.get_rng(id)),
-                        ),
-                    );
+                    // Copy random start config if it exists
+                    if dubins.random_start_config.is_some() {
+                        info!("Dubins IS SOME!!!");
+
+                        let original_config = dubins.random_start_config.as_ref().unwrap();
+
+                        // Create position builder
+                        let position_builder = RandomPosConfigBuilder {
+                            origin: Some(original_config.position.origin),
+                            variance: Some(original_config.position.variance),
+                            min_altitude: Some(original_config.position.min_altitude),
+                            max_altitude: Some(original_config.position.max_altitude),
+                        };
+
+                        // Create speed builder
+                        let speed_builder = RandomSpeedConfigBuilder {
+                            min_speed: Some(original_config.speed.min_speed),
+                            max_speed: Some(original_config.speed.max_speed),
+                        };
+
+                        // Create heading builder
+                        let heading_builder = RandomHeadingConfigBuilder {
+                            min_heading: Some(original_config.heading.min_heading),
+                            max_heading: Some(original_config.heading.max_heading),
+                        };
+
+                        // Create the complete random start builder
+                        let random_start_builder = RandomStartConfigBuilder {
+                            position: position_builder,
+                            speed: speed_builder,
+                            heading: heading_builder,
+                            seed: Some(new_seed),
+                        };
+
+                        aircraft_builder.random_start_config = Some(random_start_builder);
+                    } else {
+                        info!("Dubins IS NONE!!!");
+                    }
+
+                    builder
+                        .aircraft_builders
+                        .insert(id.clone(), AircraftBuilderEnum::Dubins(aircraft_builder));
                 }
                 AircraftConfig::Full(full) => {
                     let mut aircraft_builder = FullAircraftConfigBuilder::new();

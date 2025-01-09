@@ -12,7 +12,7 @@ use serde_json::Value;
 use rand_chacha::ChaCha8Rng;
 
 use crate::gym::config::builders::{
-    ActionSpaceBuilder, ObservationSpaceBuilder, RandomStartPosConfigBuilder,
+    ActionSpaceBuilder, ObservationSpaceBuilder, RandomStartConfigBuilder,
 };
 use crate::gym::config::errors::ConfigError;
 use crate::gym::obs::ContinuousObservationSpace;
@@ -54,9 +54,8 @@ pub struct DubinsAircraftConfigBuilder {
     pub max_turn_rate: Option<f64>,
     pub max_climb_rate: Option<f64>,
     pub max_descent_rate: Option<f64>,
-    pub random_start_config: RandomStartPosConfigBuilder,
-    #[serde(skip)]
-    rng: Option<ChaCha8Rng>,
+    pub random_start_config: Option<RandomStartConfigBuilder>,
+    pub seed: Option<u64>,
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -75,7 +74,7 @@ impl DubinsAircraftConfigBuilder {
         Self::default()
     }
 
-    pub fn from_json(value: &Value) -> Result<Self, ConfigError> {
+    pub fn from_json(value: &Value, seed: u64) -> Result<Self, ConfigError> {
         let mut builder = Self::new();
 
         builder.name = value.get("name").and_then(|v| v.as_str()).map(String::from);
@@ -90,26 +89,39 @@ impl DubinsAircraftConfigBuilder {
             builder.max_descent_rate = config.get("max_descent_rate").and_then(|v| v.as_f64());
         }
 
-        builder.random_start_config = RandomStartPosConfigBuilder::from_json(value)?;
+        // Create RandomStartConfigBuilder with either provided config or defaults
+        let random_start_builder = if let Some(random_start) = value.get("random_start") {
+            RandomStartConfigBuilder::from_json(random_start, seed)?
+        } else {
+            // Create default builder but with the provided seed
+            let mut default_builder = RandomStartConfigBuilder::new();
+            default_builder.seed = Some(seed);
+            default_builder
+        };
 
+        builder.random_start_config = Some(random_start_builder);
         Ok(builder)
     }
 }
 
 impl AircraftBuilder for DubinsAircraftConfigBuilder {
     fn build(&self) -> Result<AircraftConfig, ConfigError> {
-        info!("Building DubinsAircraftConfig with RNG: {:?}", self.rng);
+        info!("Building DubinsAircraftConfig");
         let default_config = DubinsAircraftConfig::default();
 
-        let random_start_config = if let Some(rng) = &self.rng {
-            info!("Using provided RNG for random_start_config");
-            self.random_start_config
-                .clone()
-                .with_rng(rng.clone())
-                .build()
-        } else {
-            info!("No RNG provided, using default");
-            self.random_start_config.clone().build()
+        let random_start_config = match (&self.random_start_config, self.seed) {
+            (Some(config), Some(seed)) => {
+                info!("Using master seed {} for random_start_config", seed);
+                Some(config.clone().build_with_seed(seed))
+            }
+            (Some(config), None) => {
+                info!("No seed provided, using default");
+                Some(config.clone().build())
+            }
+            (None, _) => {
+                info!("No random start config provided");
+                None
+            }
         };
 
         Ok(AircraftConfig::Dubins(DubinsAircraftConfig {
@@ -126,7 +138,7 @@ impl AircraftBuilder for DubinsAircraftConfigBuilder {
             max_descent_rate: self
                 .max_descent_rate
                 .unwrap_or(default_config.max_descent_rate),
-            random_start_config: Some(random_start_config),
+            random_start_config,
         }))
     }
 }
@@ -249,8 +261,9 @@ fn parse_geometry_json(value: &Value) -> Result<Option<AircraftGeometry>, Config
 
 impl WithRng for DubinsAircraftConfigBuilder {
     fn with_rng(mut self, rng: ChaCha8Rng) -> Self {
-        info!("Setting RNG for Dubins aircraft config: {:?}", rng);
-        self.rng = Some(rng);
+        info!("Setting seed for Dubins aircraft config from RNG");
+        let new_seed = rng.get_seed()[0] as u64;
+        self.seed = Some(new_seed);
         self
     }
 }
@@ -273,7 +286,10 @@ impl WithRng for AircraftBuilderEnum {
     }
 }
 
-pub fn create_aircraft_builder(value: &Value) -> Result<AircraftAgentBuilder, ConfigError> {
+pub fn create_aircraft_builder(
+    value: &Value,
+    seed: u64,
+) -> Result<AircraftAgentBuilder, ConfigError> {
     let aircraft_type = value
         .get("type")
         .and_then(|v| v.as_str())
@@ -291,7 +307,7 @@ pub fn create_aircraft_builder(value: &Value) -> Result<AircraftAgentBuilder, Co
 
     let aircraft_builder = match aircraft_type {
         "dubins" => {
-            let builder = DubinsAircraftConfigBuilder::from_json(value)?;
+            let builder = DubinsAircraftConfigBuilder::from_json(value, seed)?;
             AircraftBuilderEnum::Dubins(builder)
         }
         "full" => {
@@ -302,6 +318,7 @@ pub fn create_aircraft_builder(value: &Value) -> Result<AircraftAgentBuilder, Co
     };
 
     let action_builder = match action_type {
+        // No differnce between Continuous and Discrete anymore, could simplify
         "Continuous" => match aircraft_type {
             "dubins" => ActionSpaceBuilder::new().act_space(ActionSpace::new_continuous_dubins()),
             "full" => ActionSpaceBuilder::new().act_space(ActionSpace::new_continuous_full()),

@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use flyer::{
     plugins::{
         add_aircraft_plugin, AgentPlugin, CameraPlugin, HeadlessPlugin, StartupSequencePlugin,
-        TerrainPlugin, TransformationPlugin,
+        TerrainPlugin, TransformationPlugin, UpdateSequencePlugin,
     },
     resources::{RenderMode, UpdateControlPlugin},
     systems::camera_follow_system,
@@ -11,7 +11,7 @@ use flyer::{
 use crate::gym::EnvConfig;
 
 pub fn setup_app(mut app: App, config: EnvConfig, asset_path: String) -> App {
-    app.add_plugins(StartupSequencePlugin);
+    app.add_plugins((StartupSequencePlugin, UpdateSequencePlugin));
 
     app.add_plugins((
         TransformationPlugin::new(1.0),
